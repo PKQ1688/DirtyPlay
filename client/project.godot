@@ -1,0 +1,10 @@
+; Engine configuration file.
+config_version=5
+
+[application]
+config/name="DirtyPlay"
+run/main_scene="res://scenes/main_menu.tscn"
+
+[autoload]
+Network="*res://scripts/autoload/network.gd"
+GameManager="*res://scripts/autoload/game_manager.gd"

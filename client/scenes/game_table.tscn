@@ -1,0 +1,184 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/game_table.gd" id=1]
+
+[node name="GameTable" type="Control"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource(1)
+
+[node name="Background" type="ColorRect" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.06, 0.18, 0.12, 1)
+
+[node name="Root" type="MarginContainer" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 16
+offset_top = 16
+offset_right = -16
+offset_bottom = -16
+
+[node name="Columns" type="HBoxContainer" parent="Root"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme_override_constants/separation = 16
+
+[node name="Left" type="VBoxContainer" parent="Root/Columns"]
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="TablePanel" type="PanelContainer" parent="Root/Columns/Left"]
+size_flags_horizontal = 3
+
+[node name="TableVBox" type="VBoxContainer" parent="Root/Columns/Left/TablePanel"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+offset_left = 12
+offset_top = 12
+offset_right = -12
+offset_bottom = -12
+theme_override_constants/separation = 6
+
+[node name="HeaderRow" type="HBoxContainer" parent="Root/Columns/Left/TablePanel/TableVBox"]
+theme_override_constants/separation = 12
+
+[node name="PhaseLabel" type="Label" parent="Root/Columns/Left/TablePanel/TableVBox/HeaderRow"]
+text = "Phase: -"
+
+[node name="TurnLabel" type="Label" parent="Root/Columns/Left/TablePanel/TableVBox/HeaderRow"]
+text = "Current: -"
+
+[node name="PotLabel" type="Label" parent="Root/Columns/Left/TablePanel/TableVBox/HeaderRow"]
+text = "Pot: 0"
+
+[node name="CommunityLabel" type="Label" parent="Root/Columns/Left/TablePanel/TableVBox"]
+text = "Community: -"
+
+[node name="HandLabel" type="Label" parent="Root/Columns/Left/TablePanel/TableVBox"]
+text = "My Hand: -"
+
+[node name="HeatLabel" type="Label" parent="Root/Columns/Left/TablePanel/TableVBox"]
+text = "Heat: 0"
+
+[node name="SkillsLabel" type="Label" parent="Root/Columns/Left/TablePanel/TableVBox"]
+text = "Skills: -"
+
+[node name="PlayersPanel" type="PanelContainer" parent="Root/Columns/Left"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="PlayersVBox" type="VBoxContainer" parent="Root/Columns/Left/PlayersPanel"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+offset_left = 12
+offset_top = 12
+offset_right = -12
+offset_bottom = -12
+theme_override_constants/separation = 6
+
+[node name="PlayersTitle" type="Label" parent="Root/Columns/Left/PlayersPanel/PlayersVBox"]
+text = "Players"
+
+[node name="PlayersList" type="ItemList" parent="Root/Columns/Left/PlayersPanel/PlayersVBox"]
+size_flags_vertical = 3
+
+[node name="Right" type="VBoxContainer" parent="Root/Columns"]
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="ActionsPanel" type="PanelContainer" parent="Root/Columns/Right"]
+size_flags_horizontal = 3
+
+[node name="ActionsVBox" type="VBoxContainer" parent="Root/Columns/Right/ActionsPanel"]
+size_flags_horizontal = 3
+offset_left = 12
+offset_top = 12
+offset_right = -12
+offset_bottom = -12
+theme_override_constants/separation = 6
+
+[node name="ActionsTitle" type="Label" parent="Root/Columns/Right/ActionsPanel/ActionsVBox"]
+text = "Actions"
+
+[node name="CallInfo" type="HBoxContainer" parent="Root/Columns/Right/ActionsPanel/ActionsVBox"]
+theme_override_constants/separation = 12
+
+[node name="ToCallLabel" type="Label" parent="Root/Columns/Right/ActionsPanel/ActionsVBox/CallInfo"]
+text = "To Call: 0"
+
+[node name="MinRaiseLabel" type="Label" parent="Root/Columns/Right/ActionsPanel/ActionsVBox/CallInfo"]
+text = "Min Raise: 0"
+
+[node name="Buttons" type="HBoxContainer" parent="Root/Columns/Right/ActionsPanel/ActionsVBox"]
+theme_override_constants/separation = 8
+
+[node name="FoldButton" type="Button" parent="Root/Columns/Right/ActionsPanel/ActionsVBox/Buttons"]
+text = "Fold"
+
+[node name="CheckButton" type="Button" parent="Root/Columns/Right/ActionsPanel/ActionsVBox/Buttons"]
+text = "Check"
+
+[node name="CallButton" type="Button" parent="Root/Columns/Right/ActionsPanel/ActionsVBox/Buttons"]
+text = "Call"
+
+[node name="RaiseButton" type="Button" parent="Root/Columns/Right/ActionsPanel/ActionsVBox/Buttons"]
+text = "Raise"
+
+[node name="AllInButton" type="Button" parent="Root/Columns/Right/ActionsPanel/ActionsVBox/Buttons"]
+text = "All In"
+
+[node name="RaiseRow" type="HBoxContainer" parent="Root/Columns/Right/ActionsPanel/ActionsVBox"]
+theme_override_constants/separation = 8
+
+[node name="RaiseLabel" type="Label" parent="Root/Columns/Right/ActionsPanel/ActionsVBox/RaiseRow"]
+text = "Raise to"
+
+[node name="RaiseInput" type="LineEdit" parent="Root/Columns/Right/ActionsPanel/ActionsVBox/RaiseRow"]
+text = ""
+placeholder_text = "Amount"
+size_flags_horizontal = 3
+
+[node name="SkillsPanel" type="PanelContainer" parent="Root/Columns/Right"]
+size_flags_horizontal = 3
+
+[node name="SkillsVBox" type="VBoxContainer" parent="Root/Columns/Right/SkillsPanel"]
+size_flags_horizontal = 3
+offset_left = 12
+offset_top = 12
+offset_right = -12
+offset_bottom = -12
+theme_override_constants/separation = 6
+
+[node name="SkillsTitle" type="Label" parent="Root/Columns/Right/SkillsPanel/SkillsVBox"]
+text = "Skills"
+
+[node name="SkillButtons" type="HBoxContainer" parent="Root/Columns/Right/SkillsPanel/SkillsVBox"]
+theme_override_constants/separation = 6
+
+[node name="SelectRow" type="HBoxContainer" parent="Root/Columns/Right/SkillsPanel/SkillsVBox"]
+theme_override_constants/separation = 8
+
+[node name="SelectedSkillLabel" type="Label" parent="Root/Columns/Right/SkillsPanel/SkillsVBox/SelectRow"]
+text = "Selected: -"
+size_flags_horizontal = 3
+
+[node name="TargetOption" type="OptionButton" parent="Root/Columns/Right/SkillsPanel/SkillsVBox/SelectRow"]
+size_flags_horizontal = 3
+
+[node name="CardIdxOption" type="OptionButton" parent="Root/Columns/Right/SkillsPanel/SkillsVBox/SelectRow"]
+size_flags_horizontal = 2
+
+[node name="UseSkillButton" type="Button" parent="Root/Columns/Right/SkillsPanel/SkillsVBox/SelectRow"]
+text = "Use"
+
+[node name="StatusLabel" type="Label" parent="Root/Columns/Right"]
+text = "Status: -"
+
+[connection signal="pressed" from="Root/Columns/Right/ActionsPanel/ActionsVBox/Buttons/FoldButton" to="." method="_on_fold_pressed"]
+[connection signal="pressed" from="Root/Columns/Right/ActionsPanel/ActionsVBox/Buttons/CheckButton" to="." method="_on_check_pressed"]
+[connection signal="pressed" from="Root/Columns/Right/ActionsPanel/ActionsVBox/Buttons/CallButton" to="." method="_on_call_pressed"]
+[connection signal="pressed" from="Root/Columns/Right/ActionsPanel/ActionsVBox/Buttons/RaiseButton" to="." method="_on_raise_pressed"]
+[connection signal="pressed" from="Root/Columns/Right/ActionsPanel/ActionsVBox/Buttons/AllInButton" to="." method="_on_allin_pressed"]
+[connection signal="pressed" from="Root/Columns/Right/SkillsPanel/SkillsVBox/SelectRow/UseSkillButton" to="." method="_on_use_skill_pressed"]
