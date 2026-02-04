@@ -1,0 +1,40 @@
+# Go
+server/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+
+# Godot
+client/.godot/
+client/.import/
+client/export.cfg
+client/export_presets.cfg
+client/*.translation
+client/.mono/
+client/data_*/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.envrc
+
+# Build outputs
+dist/
+build/
+*.log
+
+# Dependencies
+node_modules/
+vendor/
