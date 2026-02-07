@@ -57,9 +57,9 @@ func _on_error(message: String) -> void:
 	status_label.text = "Status: %s" % message
 
 func _on_skill_effect(effect: Dictionary) -> void:
-	var skill_id := effect.get("skill_id", "")
-	var blocked := effect.get("blocked", false)
-	var result := effect.get("result", {})
+	var skill_id: String = str(effect.get("skill_id", ""))
+	var blocked: bool = bool(effect.get("blocked", false))
+	var result: Variant = effect.get("result", {})
 	if blocked:
 		status_label.text = "Skill %s blocked" % skill_id
 	else:
@@ -78,12 +78,12 @@ func _update_state(state: Dictionary) -> void:
 	community_label.text = "Community: %s" % ", ".join(state.get("community_cards", []))
 	hand_label.text = "My Hand: %s" % ", ".join(state.get("my_hand", []))
 	heat_label.text = "Heat: %d" % int(state.get("my_heat", 0))
-	var is_my_turn := state.get("current_player", "") == GameManager.player_id
+	var is_my_turn: bool = str(state.get("current_player", "")) == GameManager.player_id
 	_update_action_buttons(is_my_turn)
 	_refresh_skills(state.get("my_skills", []))
 	_refresh_targets(state.get("players", []))
 	_update_skill_controls()
-	var skills := []
+	var skills: Array[String] = []
 	for s in state.get("my_skills", []):
 		if typeof(s) == TYPE_DICTIONARY:
 			skills.append("%s(%s)" % [s.get("name", ""), s.get("id", "")])
@@ -93,10 +93,10 @@ func _update_state(state: Dictionary) -> void:
 	for p in state.get("players", []):
 		if typeof(p) != TYPE_DICTIONARY:
 			continue
-		var prefix := ""
+		var prefix: String = ""
 		if p.get("id", "") == state.get("current_player", ""):
 			prefix = ">> "
-		var line := "%s%s (%s) | seat %s | stack %s | bet %s | %s" % [
+		var line: String = "%s%s (%s) | seat %s | stack %s | bet %s | %s" % [
 			prefix,
 			p.get("name", ""),
 			p.get("id", ""),
@@ -145,9 +145,9 @@ func _refresh_skills(skills: Array) -> void:
 	for s in skills:
 		if typeof(s) != TYPE_DICTIONARY:
 			continue
-		var skill_id := s.get("id", "")
-		var skill_name := s.get("name", skill_id)
-		var button := Button.new()
+		var skill_id: String = str(s.get("id", ""))
+		var skill_name: String = str(s.get("name", skill_id))
+		var button: Button = Button.new()
 		button.text = skill_name
 		button.disabled = skill_id == "counter"
 		button.pressed.connect(_on_skill_button_pressed.bind(skill_id))
@@ -177,17 +177,17 @@ func _refresh_targets(players: Array) -> void:
 			continue
 		if p.get("status", "") == "folded" or p.get("status", "") == "out":
 			continue
-		var name := p.get("name", "")
-		var pid := p.get("id", "")
+		var name: String = str(p.get("name", ""))
+		var pid: String = str(p.get("id", ""))
 		target_option.add_item("%s (%s)" % [name, pid])
 		target_ids.append(pid)
 	target_option.selected = 0
 
 func _update_skill_controls() -> void:
 	selected_skill_label.text = "Selected: %s" % (selected_skill_id if selected_skill_id != "" else "-")
-	var is_my_turn := last_state.get("current_player", "") == GameManager.player_id
-	var need_target := selected_skill_id == "peek"
-	var need_card := selected_skill_id == "swap"
+	var is_my_turn: bool = str(last_state.get("current_player", "")) == GameManager.player_id
+	var need_target: bool = selected_skill_id == "peek"
+	var need_card: bool = selected_skill_id == "swap"
 	target_option.visible = need_target
 	card_idx_option.visible = need_card
 	if not is_my_turn:

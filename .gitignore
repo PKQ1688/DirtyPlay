@@ -34,7 +34,12 @@ client/data_*/
 dist/
 build/
 *.log
+output/
+client/export_templates/
 
 # Dependencies
 node_modules/
 vendor/
+
+# Local working notes
+progress.md

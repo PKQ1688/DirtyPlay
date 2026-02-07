@@ -19,8 +19,10 @@ const (
 	maxPlayers        = 6
 	minPlayersToStart = 2
 	targetPlayers     = 4
+	initialStack      = 1000
 	actionTimeout     = 30 * time.Second
 	nextHandDelay     = 3 * time.Second
+	evictTimeout      = 8 * time.Second
 )
 
 type Event struct {
@@ -125,6 +127,7 @@ func (r *Room) handleJoin(evt Event) bool {
 		r.reply(evt, "", errors.New("room mismatch"))
 		return false
 	}
+	connectedHumansBeforeJoin := r.connectedHumanCount()
 	playerID := join.PlayerID
 	if playerID == "" {
 		playerID = uuid.NewString()
@@ -148,16 +151,24 @@ func (r *Room) handleJoin(evt Event) bool {
 			ID:     playerID,
 			Name:   name,
 			Seat:   seat,
-			Stack:  1000,
+			Stack:  initialStack,
 			Status: StatusOut,
 		}
 		if r.state.Phase == PhaseWaiting {
 			player.Status = StatusActive
 		}
 		r.state.Players = append(r.state.Players, player)
+	} else if join.Name != "" {
+		player.Name = join.Name
 	}
 	r.conns[playerID] = evt.Conn
 	delete(r.disconnected, playerID)
+	player.DisconnectedAt = time.Time{}
+
+	if connectedHumansBeforeJoin == 0 && r.connectedHumanCount() == 1 {
+		r.resetForFreshSession(playerID)
+	}
+
 	r.reply(evt, playerID, nil)
 	return true
 }
@@ -167,7 +178,38 @@ func (r *Room) handleLeave(evt Event) bool {
 		return false
 	}
 	delete(r.conns, evt.PlayerID)
-	r.disconnected[evt.PlayerID] = time.Now()
+	now := time.Now()
+	r.disconnected[evt.PlayerID] = now
+	player := r.state.PlayerByID(evt.PlayerID)
+	if player == nil {
+		if r.connectedHumanCount() == 0 {
+			r.resetToEmptyRoom()
+			return true
+		}
+		return false
+	}
+
+	player.DisconnectedAt = now
+	if r.state.Phase == PhaseWaiting {
+		player.Status = StatusOut
+		changed := r.pruneDisconnectedPlayers(now)
+		if r.connectedHumanCount() == 0 {
+			r.resetToEmptyRoom()
+			return true
+		}
+		return changed
+	}
+
+	if player.IsInHand() {
+		player.Status = StatusOut
+		player.ActedThisRound = true
+		if evt.PlayerID == r.state.CurrentPlayer {
+			r.afterAction()
+		} else if r.remainingInHand() <= 1 {
+			r.finishHandByFold()
+		}
+		return true
+	}
 	return false
 }
 
@@ -359,7 +401,7 @@ func (r *Room) sendActionRequest() {
 		toCall := r.state.CurrentBet - player.Bet
 		minRaise := r.state.MinRaise
 		valid := validActions(player, toCall, minRaise)
-		canUseSkill := player.Heat < skill.LockoutThreshold && len(player.Skills) > 0
+		canUseSkill := player.Heat < skill.LockoutThreshold && len(player.Skills) > 0 && !player.SkillUsedThisTurn
 		_ = conn.SendMessage("action_req", protocol.ActionRequestMsg{
 			PlayerID:     player.ID,
 			ValidActions: valid,
@@ -582,6 +624,21 @@ func (r *Room) endHand() {
 			p.Status = StatusActive
 		}
 	}
+	kept := make([]*PlayerState, 0, len(r.state.Players))
+	for _, p := range r.state.Players {
+		if p.IsBot {
+			kept = append(kept, p)
+			continue
+		}
+		if _, ok := r.conns[p.ID]; ok {
+			p.DisconnectedAt = time.Time{}
+			kept = append(kept, p)
+			continue
+		}
+		delete(r.disconnected, p.ID)
+	}
+	r.state.Players = kept
+
 	r.state.Pots = nil
 	r.state.Community = nil
 	r.state.CurrentBet = 0
@@ -589,6 +646,10 @@ func (r *Room) endHand() {
 	r.state.CurrentPlayer = ""
 	r.state.Phase = PhaseWaiting
 	r.effects.ClearHand()
+
+	if r.connectedHumanCount() == 0 {
+		r.resetToEmptyRoom()
+	}
 }
 
 func (r *Room) tryStartHand() {
@@ -831,6 +892,9 @@ func (r *Room) checkTimeouts() bool {
 			r.afterAction()
 		}
 	}
+	if r.pruneDisconnectedPlayers(now) {
+		return true
+	}
 	return changed
 }
 
@@ -1054,12 +1118,12 @@ func (r *Room) ensureBots(target int) bool {
 		aggro := 0.25 + r.rng.Float64()*0.6
 		skilliness := 0.2 + r.rng.Float64()*0.6
 		bot := &PlayerState{
-			ID:     "bot-" + uuid.NewString(),
-			Name:   fmt.Sprintf("Bot%d", seat+1),
-			Seat:   seat,
-			Stack:  1000,
-			Status: StatusActive,
-			IsBot:  true,
+			ID:         "bot-" + uuid.NewString(),
+			Name:       fmt.Sprintf("Bot%d", seat+1),
+			Seat:       seat,
+			Stack:      initialStack,
+			Status:     StatusActive,
+			IsBot:      true,
 			Aggression: aggro,
 			Skilliness: skilliness,
 		}
@@ -1078,6 +1142,107 @@ func (r *Room) humanCount() int {
 		}
 	}
 	return count
+}
+
+func (r *Room) connectedHumanCount() int {
+	count := 0
+	for _, p := range r.state.Players {
+		if p.IsBot {
+			continue
+		}
+		if _, ok := r.conns[p.ID]; ok {
+			count++
+		}
+	}
+	return count
+}
+
+func (r *Room) resetForFreshSession(playerID string) {
+	player := r.state.PlayerByID(playerID)
+	if player == nil {
+		return
+	}
+	player.Seat = 0
+	player.Stack = initialStack
+	player.Bet = 0
+	player.TotalBet = 0
+	player.Status = StatusActive
+	player.IsBot = false
+	player.Aggression = 0
+	player.Skilliness = 0
+	player.Hand = nil
+	player.Skills = nil
+	player.Heat = 0
+	player.ActedThisRound = false
+	player.SkillUsedThisTurn = false
+	player.DisconnectedAt = time.Time{}
+
+	keepConn := r.conns[playerID]
+	r.state.Players = []*PlayerState{player}
+	r.conns = map[string]Conn{playerID: keepConn}
+	r.disconnected = map[string]time.Time{}
+
+	r.state.Deck = nil
+	r.state.Community = nil
+	r.state.Pots = nil
+	r.state.CurrentPlayer = ""
+	r.state.CurrentBet = 0
+	r.state.MinRaise = r.state.BigBlind
+	r.state.DealerSeat = -1
+	r.state.Phase = PhaseWaiting
+	r.state.NextHandAt = time.Time{}
+	r.effects.ClearHand()
+}
+
+func (r *Room) resetToEmptyRoom() {
+	r.state.Players = nil
+	r.state.Deck = nil
+	r.state.Community = nil
+	r.state.Pots = nil
+	r.state.CurrentPlayer = ""
+	r.state.CurrentBet = 0
+	r.state.MinRaise = r.state.BigBlind
+	r.state.DealerSeat = -1
+	r.state.Phase = PhaseWaiting
+	r.state.NextHandAt = time.Time{}
+	r.effects.ClearHand()
+	r.conns = map[string]Conn{}
+	r.disconnected = map[string]time.Time{}
+}
+
+func (r *Room) pruneDisconnectedPlayers(now time.Time) bool {
+	if r.state.Phase != PhaseWaiting {
+		return false
+	}
+	changed := false
+	kept := make([]*PlayerState, 0, len(r.state.Players))
+	for _, p := range r.state.Players {
+		if p.DisconnectedAt.IsZero() {
+			kept = append(kept, p)
+			continue
+		}
+		if _, connected := r.conns[p.ID]; connected {
+			p.DisconnectedAt = time.Time{}
+			kept = append(kept, p)
+			continue
+		}
+		if now.Sub(p.DisconnectedAt) < evictTimeout {
+			kept = append(kept, p)
+			continue
+		}
+		changed = true
+	}
+	if !changed {
+		return false
+	}
+	r.state.Players = kept
+	if r.state.PlayerByID(r.state.CurrentPlayer) == nil {
+		r.state.CurrentPlayer = ""
+	}
+	if r.playerBySeat(r.state.DealerSeat) == nil {
+		r.state.DealerSeat = -1
+	}
+	return true
 }
 
 func (r *Room) botAct(player *PlayerState) bool {
@@ -1104,28 +1269,13 @@ func (r *Room) chooseBotAction(player *PlayerState) protocol.ActionMsg {
 	toCall := r.state.CurrentBet - player.Bet
 	canRaise := player.Stack > toCall && player.Stack >= toCall+r.state.MinRaise
 	maxRaise := player.Bet + player.Stack
-	aggro := player.Aggression
-	if aggro <= 0 {
-		aggro = 0.35
-	}
-	raiseChance := 0.1 + 0.35*aggro
-	foldThreshold := 0.25 + 0.35*(1.0-aggro)
-
 	if toCall <= 0 {
-		if canRaise && r.rng.Float64() < raiseChance {
-			raiseTo := r.state.CurrentBet + r.state.MinRaise
-			extra := r.rng.Intn(r.state.MinRaise+1) + int(float64(r.state.MinRaise)*aggro*0.5)
-			amount := raiseTo + extra
+		if canRaise && r.rng.Float64() < 0.22 {
+			amount := r.state.CurrentBet + r.state.MinRaise
 			if amount > maxRaise {
 				amount = maxRaise
 			}
-			if amount <= r.state.CurrentBet {
-				amount = r.state.CurrentBet + r.state.MinRaise
-			}
 			return protocol.ActionMsg{Action: "raise", Amount: amount}
-		}
-		if player.Stack <= r.state.BigBlind && r.rng.Float64() < 0.5 {
-			return protocol.ActionMsg{Action: "all_in"}
 		}
 		return protocol.ActionMsg{Action: "check"}
 	}
@@ -1133,22 +1283,30 @@ func (r *Room) chooseBotAction(player *PlayerState) protocol.ActionMsg {
 	if toCall >= player.Stack {
 		return protocol.ActionMsg{Action: "all_in"}
 	}
-	if canRaise && r.rng.Float64() < raiseChance*0.7 {
-		raiseTo := r.state.CurrentBet + r.state.MinRaise
-		extra := r.rng.Intn(r.state.MinRaise+1) + int(float64(r.state.MinRaise)*aggro*0.3)
-		amount := raiseTo + extra
-		if amount > maxRaise {
-			amount = maxRaise
+
+	callLimit := maxInt(r.state.BigBlind*3, player.Stack/6)
+	if toCall <= callLimit {
+		if canRaise && r.rng.Float64() < 0.15 {
+			amount := r.state.CurrentBet + r.state.MinRaise
+			if amount > maxRaise {
+				amount = maxRaise
+			}
+			return protocol.ActionMsg{Action: "raise", Amount: amount}
 		}
-		if amount <= r.state.CurrentBet {
-			amount = r.state.CurrentBet + r.state.MinRaise
-		}
-		return protocol.ActionMsg{Action: "raise", Amount: amount}
+		return protocol.ActionMsg{Action: "call"}
 	}
-	if float64(toCall) > float64(player.Stack)*foldThreshold && r.rng.Float64() < (0.4 + 0.3*(1.0-aggro)) {
-		return protocol.ActionMsg{Action: "fold"}
+
+	if r.rng.Float64() < 0.08 {
+		return protocol.ActionMsg{Action: "call"}
 	}
-	return protocol.ActionMsg{Action: "call"}
+	return protocol.ActionMsg{Action: "fold"}
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (r *Room) fallbackBotAction(player *PlayerState) protocol.ActionMsg {

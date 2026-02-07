@@ -142,6 +142,42 @@ go run cmd/server/main.go
 1. 使用 Godot 4 打开 `client/project.godot`
 2. 按 F5 运行游戏
 
+### 启动浏览器可视化客户端（推荐）
+
+1. 启动服务端（会同时托管 `web/` 静态页面）：
+
+```bash
+cd server
+go run cmd/server/main.go
+```
+
+2. 浏览器打开：`http://localhost:8080`
+3. 在页面中输入服务器地址与房间号后点击“连接”“加入”
+4. 进入可视化牌桌后可直接进行行动与技能操作
+
+### 浏览器可视化界面说明
+
+- 公共牌、手牌、玩家席位均为可视化卡牌组件（红黑花色区分）
+- 当前行动玩家席位会高亮
+- 公共牌发牌、下注变化、状态变化包含轻量动画反馈
+- 移动端支持横屏可玩（竖屏会提示切换横屏）
+- 调试接口：
+  - `window.render_game_to_text()`：输出当前可视状态 JSON
+  - `window.advanceTime(ms)`：推进 UI 计时/动画队列
+
+### 浏览器技能回归（一键覆盖验证）
+
+在服务端运行后，可执行以下命令自动覆盖验证 `counter / mist / peek / bluff / swap`：
+
+```bash
+npm run verify:skills
+```
+
+验证完成后会生成：
+
+- 汇总结果：`output/playwright/skill-coverage/skill-coverage-summary.json`
+- 每个技能的截图与断言：`output/playwright/skill-coverage/*.png` 与 `output/playwright/skill-coverage/*.json`
+
 ### 构建生产版本
 
 **服务端：**

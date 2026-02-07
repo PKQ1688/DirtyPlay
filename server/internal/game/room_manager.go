@@ -37,6 +37,7 @@ func (rm *RoomManager) HandleMessage(conn Conn, msgType string, seq int64, paylo
 			_ = conn.SendMessage("error", protocol.ErrorMsg{Code: 400, Message: "invalid join payload"})
 			return
 		}
+		prevSession, prevRoom := rm.currentSession(conn.ID())
 		room := rm.getOrCreateRoom(join.RoomID)
 		reply := make(chan EventResult, 1)
 		room.eventCh <- Event{
@@ -51,7 +52,19 @@ func (rm *RoomManager) HandleMessage(conn Conn, msgType string, seq int64, paylo
 				_ = conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: res.Err.Error()})
 				return
 			}
+			if prevSession != nil && (prevSession.PlayerID != res.PlayerID || prevSession.RoomID != join.RoomID) && prevRoom != nil {
+				prevRoom.eventCh <- Event{
+					Type:     "leave",
+					PlayerID: prevSession.PlayerID,
+					Conn:     conn,
+				}
+			}
 			rm.mu.Lock()
+			if prevSession != nil {
+				if existing, ok := rm.players[prevSession.PlayerID]; ok && existing == conn.ID() {
+					delete(rm.players, prevSession.PlayerID)
+				}
+			}
 			if oldConnID, ok := rm.players[res.PlayerID]; ok && oldConnID != conn.ID() {
 				delete(rm.sessions, oldConnID)
 			}
@@ -101,6 +114,21 @@ func (rm *RoomManager) HandleMessage(conn Conn, msgType string, seq int64, paylo
 	default:
 		_ = conn.SendMessage("error", protocol.ErrorMsg{Code: 404, Message: "unknown message type"})
 	}
+}
+
+func (rm *RoomManager) currentSession(connID string) (*Session, *Room) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	s, ok := rm.sessions[connID]
+	if !ok {
+		return nil, nil
+	}
+	session := &Session{
+		RoomID:   s.RoomID,
+		PlayerID: s.PlayerID,
+	}
+	room := rm.rooms[session.RoomID]
+	return session, room
 }
 
 func (rm *RoomManager) Disconnect(conn Conn) {

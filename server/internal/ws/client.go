@@ -15,7 +15,7 @@ import (
 
 const (
 	writeWait  = 10 * time.Second
-	pongWait   = 60 * time.Second
+	pongWait   = 12 * time.Second
 	pingPeriod = (pongWait * 9) / 10
 	maxMsgSize = 64 * 1024
 )
@@ -27,6 +27,7 @@ type Client struct {
 	send    chan []byte
 	roomMgr *game.RoomManager
 	seq     int64
+	closed  atomic.Bool
 }
 
 func NewClient(hub *Hub, conn *websocket.Conn, roomMgr *game.RoomManager) *Client {
@@ -44,11 +45,23 @@ func (c *Client) ID() string {
 }
 
 func (c *Client) SendMessage(msgType string, payload any) error {
+	if c.closed.Load() {
+		return errors.New("client closed")
+	}
 	seq := atomic.AddInt64(&c.seq, 1)
 	data, err := protocol.EncodeMessage(msgType, seq, payload)
 	if err != nil {
 		return err
 	}
+	return c.enqueue(data)
+}
+
+func (c *Client) enqueue(data []byte) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = errors.New("client closed")
+		}
+	}()
 	select {
 	case c.send <- data:
 		return nil

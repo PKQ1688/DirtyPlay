@@ -1,0 +1,7 @@
+{
+  "name": "dirtyplay-tools",
+  "private": true,
+  "scripts": {
+    "verify:skills": "node \"web/skill_coverage_verify.mjs\""
+  }
+}

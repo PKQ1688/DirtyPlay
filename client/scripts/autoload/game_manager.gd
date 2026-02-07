@@ -7,6 +7,7 @@ signal skill_effect(effect)
 signal error_received(message)
 
 var player_id := ""
+var player_id_override := ""
 var room_id := ""
 var state := {}
 var last_action_req := {}
@@ -41,8 +42,11 @@ func use_skill(skill_id: String, target_id: String = "", card_idx: int = -1) -> 
 func _on_message(msg: Dictionary) -> void:
 	if not msg.has("type"):
 		return
-	var msg_type := msg["type"]
-	var payload := msg.get("payload", {})
+	var msg_type: String = str(msg["type"])
+	var payload: Dictionary = {}
+	var payload_raw: Variant = msg.get("payload", {})
+	if typeof(payload_raw) == TYPE_DICTIONARY:
+		payload = payload_raw
 	match msg_type:
 		"ack":
 			if payload.has("player_id"):
@@ -64,6 +68,10 @@ func _on_message(msg: Dictionary) -> void:
 			pass
 
 func _load_player_id() -> void:
+	player_id_override = _read_player_id_override()
+	if player_id_override != "":
+		player_id = player_id_override
+		return
 	var path := "user://player_id.txt"
 	if FileAccess.file_exists(path):
 		var file := FileAccess.open(path, FileAccess.READ)
@@ -71,6 +79,19 @@ func _load_player_id() -> void:
 			player_id = file.get_line().strip_edges()
 
 func _save_player_id() -> void:
+	if player_id_override != "":
+		return
 	var file := FileAccess.open("user://player_id.txt", FileAccess.WRITE)
 	if file:
 		file.store_line(player_id)
+
+func _read_player_id_override() -> String:
+	var args := OS.get_cmdline_user_args()
+	for arg in args:
+		var trimmed := arg.strip_edges()
+		if trimmed.begins_with("--"):
+			trimmed = trimmed.substr(2)
+		var prefix := "player_id="
+		if trimmed.begins_with(prefix):
+			return trimmed.substr(prefix.length())
+	return ""
