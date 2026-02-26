@@ -15,22 +15,23 @@ const (
 )
 
 type PlayerState struct {
-	ID              string
-	Name            string
-	Seat            int
-	Stack           int
-	Bet             int
-	TotalBet        int
-	Status          string
-	IsBot           bool
-	Aggression      float64
-	Skilliness      float64
-	Hand            []poker.Card
-	Skills          []skill.Card
-	Heat            int
-	ActedThisRound  bool
+	ID                string
+	Name              string
+	Seat              int
+	Stack             int
+	Bet               int
+	TotalBet          int
+	LastAction        string
+	Status            string
+	IsBot             bool
+	Aggression        float64
+	Skilliness        float64
+	Hand              []poker.Card
+	Skills            []skill.Card
+	Heat              int
+	ActedThisRound    bool
 	SkillUsedThisTurn bool
-	DisconnectedAt  time.Time
+	DisconnectedAt    time.Time
 }
 
 func (p *PlayerState) IsInHand() bool {
@@ -44,6 +45,7 @@ func (p *PlayerState) CanAct() bool {
 func (p *PlayerState) ResetForHand() {
 	p.Bet = 0
 	p.TotalBet = 0
+	p.LastAction = ""
 	p.Hand = nil
 	p.Status = StatusActive
 	p.ActedThisRound = false

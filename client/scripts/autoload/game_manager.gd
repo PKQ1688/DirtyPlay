@@ -49,7 +49,10 @@ func _on_message(msg: Dictionary) -> void:
 		payload = payload_raw
 	match msg_type:
 		"ack":
-			if payload.has("player_id"):
+			if payload.get("success", true) == false:
+				var err_msg: String = str(payload.get("error", "unknown error"))
+				emit_signal("error_received", err_msg)
+			elif payload.has("player_id"):
 				player_id = payload["player_id"]
 				_save_player_id()
 				emit_signal("joined", player_id)

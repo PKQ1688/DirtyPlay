@@ -13,10 +13,22 @@ const PHASE_LABELS = {
 };
 
 const STATUS_LABELS = {
-  active: "游戏中",
-  folded: "已弃牌",
-  all_in: "全下",
+  active: "在局",
+  folded: "Fold",
+  all_in: "All-in",
   out: "出局",
+};
+
+const ACTION_LABELS = {
+  blind: "盲注",
+  blind_sb: "小盲",
+  blind_bb: "大盲",
+  fold: "Fold",
+  check: "Check",
+  call: "Call",
+  raise: "Raise",
+  all_in: "All-in",
+  out: "离桌",
 };
 
 const SKILL_META = {
@@ -63,10 +75,10 @@ const SERVER_ERROR_MAP = {
 };
 
 const SUIT_META = {
-  S: { symbol: "♠", red: false },
-  H: { symbol: "♥", red: true },
-  D: { symbol: "♦", red: true },
-  C: { symbol: "♣", red: false },
+  S: { symbol: "♠", name: "黑桃", red: false },
+  H: { symbol: "♥", name: "红桃", red: true },
+  D: { symbol: "♦", name: "方片", red: true },
+  C: { symbol: "♣", name: "梅花", red: false },
 };
 
 const SEAT_SLOTS = {
@@ -98,6 +110,8 @@ const refs = {
   phaseText: document.getElementById("phaseText"),
   turnText: document.getElementById("turnText"),
   potText: document.getElementById("potText"),
+  mainPotText: document.getElementById("mainPotText"),
+  sidePotsText: document.getElementById("sidePotsText"),
   heatText: document.getElementById("heatText"),
   communityText: document.getElementById("communityText"),
   handText: document.getElementById("handText"),
@@ -108,6 +122,10 @@ const refs = {
   playersList: document.getElementById("playersList"),
   toCallText: document.getElementById("toCallText"),
   minRaiseText: document.getElementById("minRaiseText"),
+  raiseToText: document.getElementById("raiseToText"),
+  maxRaiseText: document.getElementById("maxRaiseText"),
+  myStreetBetText: document.getElementById("myStreetBetText"),
+  myInvestedText: document.getElementById("myInvestedText"),
   foldButton: document.getElementById("foldButton"),
   checkButton: document.getElementById("checkButton"),
   callButton: document.getElementById("callButton"),
@@ -121,6 +139,7 @@ const refs = {
   targetSelect: document.getElementById("targetSelect"),
   cardIdxSelect: document.getElementById("cardIdxSelect"),
   useSkillButton: document.getElementById("useSkillButton"),
+  actionLogList: document.getElementById("actionLogList"),
 };
 
 const appState = {
@@ -149,6 +168,8 @@ setStatus("未连接", false);
 renderCommunityCards([], []);
 renderHandCards([], []);
 renderSeats([], [], "");
+renderPotBreakdown([], 0);
+renderActionLog([]);
 updateActionArea();
 updateSkillControls();
 
@@ -380,7 +401,7 @@ function onMessage(raw) {
       if (payload.blocked) {
         setStatus(`技能被抵消: ${skillName}`, true);
       } else if (payload.result && payload.result.card) {
-        setStatus(`技能生效: ${skillName} -> ${payload.result.card}`, false);
+        setStatus(`技能生效: ${skillName} -> ${formatCardCodeVerbose(payload.result.card)}`, false);
       } else {
         setStatus(`技能生效: ${skillName}`, false);
       }
@@ -400,12 +421,14 @@ function renderState(rawState) {
   const previousState = appState.lastState;
   const state = normalizeState(rawState);
   appState.lastState = state;
+  const pots = ensureArray(state.pots).length > 0 ? state.pots : calculatePotsFromPlayers(state.players);
 
   const currentPlayerName = displayPlayerName(state.current_player, state.players);
   refs.phaseText.textContent = `阶段: ${displayPhase(state.phase)}`;
   refs.turnText.textContent = `当前行动: ${currentPlayerName}`;
   refs.potText.textContent = `底池: ${Number(state.total_pot)}`;
   refs.heatText.textContent = `怀疑值: ${Number(state.my_heat)}`;
+  renderPotBreakdown(pots, state.total_pot);
 
   const skills = ensureArray(state.my_skills);
   refs.skillsText.textContent = `技能: ${skills.map((skill) => `${displaySkillName(skill)}(${String(skill.id || "")})`).join("、") || "-"}`;
@@ -416,9 +439,53 @@ function renderState(rawState) {
   renderTargets(state.players);
   renderSeats(state.players, previousState.players, state.current_player);
   renderLegacyPlayers(state.players, state.current_player);
+  renderActionLog(state.recent_actions);
 
   updateActionArea();
   updateSkillControls();
+}
+
+function renderPotBreakdown(pots, totalPot) {
+  const safePots = ensureArray(pots).filter((pot) => Number(pot.amount || 0) > 0);
+  const mainPot = safePots.find((pot) => String(pot.kind || "") === "main") || safePots[0] || null;
+  refs.mainPotText.textContent = `主池: ${Number(mainPot?.amount || 0)}`;
+
+  const sidePots = safePots.filter((pot, index) => {
+    if (String(pot.kind || "") === "main") {
+      return false;
+    }
+    if (!pot.kind && index === 0) {
+      return false;
+    }
+    return true;
+  });
+  if (sidePots.length === 0) {
+    refs.sidePotsText.textContent = "边池: -";
+  } else {
+    const text = sidePots.map((pot, index) => `#${index + 1} ${Number(pot.amount || 0)}`).join(" / ");
+    refs.sidePotsText.textContent = `边池: ${text}`;
+  }
+
+  if (safePots.length === 0 && Number(totalPot || 0) > 0) {
+    refs.mainPotText.textContent = `主池: ${Number(totalPot || 0)}`;
+  }
+}
+
+function renderActionLog(actions) {
+  refs.actionLogList.innerHTML = "";
+  const safeActions = ensureArray(actions).slice(-10);
+  if (safeActions.length === 0) {
+    const empty = document.createElement("li");
+    empty.textContent = "暂无行动记录";
+    refs.actionLogList.appendChild(empty);
+    return;
+  }
+
+  safeActions.forEach((entry) => {
+    const item = document.createElement("li");
+    item.textContent = formatActionLogEntry(entry);
+    refs.actionLogList.appendChild(item);
+  });
 }
 
 function renderCommunityCards(cards, previousCards) {
@@ -436,7 +503,7 @@ function renderCommunityCards(cards, previousCards) {
     refs.communityCards.appendChild(createCardElement(cardCode, { animate: shouldAnimate }));
   });
 
-  refs.communityText.textContent = `公共牌: ${safeCards.join(", ")}`;
+  refs.communityText.textContent = `公共牌: ${safeCards.map((cardCode) => formatCardCodeShort(cardCode)).join("、")}`;
 }
 
 function renderHandCards(cards, previousCards) {
@@ -454,7 +521,7 @@ function renderHandCards(cards, previousCards) {
     refs.handCards.appendChild(createCardElement(cardCode, { animate: shouldAnimate }));
   });
 
-  refs.handText.textContent = `我的手牌: ${safeCards.join(", ")}`;
+  refs.handText.textContent = `我的手牌: ${safeCards.map((cardCode) => formatCardCodeShort(cardCode)).join("、")}`;
 }
 
 function renderSeats(players, previousPlayers, currentPlayerId) {
@@ -503,8 +570,16 @@ function renderSeats(players, previousPlayers, currentPlayerId) {
     const metaRow = document.createElement("div");
     metaRow.className = "seat-meta";
     metaRow.appendChild(makeChip(`筹码 ${Number(player.stack)}`));
-    metaRow.appendChild(makeChip(`下注 ${Number(player.bet)}`));
+    metaRow.appendChild(makeChip(`本轮下注 ${Number(player.bet)}`));
+    metaRow.appendChild(makeChip(`本局投入 ${Number(player.total_bet)}`));
     metaRow.appendChild(makeChip(statusLabel(status)));
+
+    const lastAction = String(player.last_action || "");
+    if (lastAction) {
+      metaRow.appendChild(makeChip(actionLabel(lastAction), actionChipClass(lastAction)));
+    } else if (status === "active" && player.acted_this_round) {
+      metaRow.appendChild(makeChip("已行动", "action"));
+    }
 
     if (player.id === appState.playerId) {
       metaRow.appendChild(makeChip("自己", "self"));
@@ -560,12 +635,18 @@ function renderLegacyPlayers(players, currentPlayerId) {
     parts.push(`seat ${Number(player.seat)}`);
     parts.push(`stack ${Number(player.stack)}`);
     parts.push(`bet ${Number(player.bet)}`);
+    parts.push(`total ${Number(player.total_bet)}`);
     parts.push(normalizeStatus(player.status));
+    if (player.last_action) {
+      parts.push(`last ${player.last_action}`);
+    } else if (player.acted_this_round) {
+      parts.push("acted");
+    }
     if (player.heat_warning) {
       parts.push("suspicious");
     }
     if (ensureArray(player.hand).length > 0) {
-      parts.push(`hand ${ensureArray(player.hand).join(", ")}`);
+      parts.push(`hand ${ensureArray(player.hand).map((cardCode) => formatCardCodeShort(cardCode)).join(", ")}`);
     }
     line.textContent = parts.join(" | ");
     refs.playersList.appendChild(line);
@@ -652,12 +733,21 @@ function updateActionArea() {
   const validActions = ensureArray(appState.actionReq.valid_actions);
   const toCall = Number(appState.actionReq.to_call || 0);
   const minRaise = Number(appState.actionReq.min_raise || 0);
+  const maxRaise = Number(appState.actionReq.max_raise || 0);
+  const me = myPlayerState();
+  const myStreetBet = Number(me?.bet || 0);
+  const myInvested = Number(me?.total_bet || 0);
+  const minRaiseTo = myStreetBet + toCall + minRaise;
 
   refs.toCallText.textContent = `需跟注: ${toCall}`;
-  refs.minRaiseText.textContent = `最小加注: ${minRaise}`;
+  refs.minRaiseText.textContent = `最小加注增量: ${minRaise}`;
+  refs.raiseToText.textContent = `最小加注到: ${minRaiseTo}`;
+  refs.maxRaiseText.textContent = `加注上限: ${maxRaise}`;
+  refs.myStreetBetText.textContent = `本轮已下注: ${myStreetBet}`;
+  refs.myInvestedText.textContent = `本局总投入: ${myInvested}`;
 
   if (validActions.includes("raise")) {
-    refs.raiseInput.value = String(myCurrentBet() + toCall + minRaise);
+    refs.raiseInput.value = String(minRaiseTo);
   }
 
   const isMyTurn = Boolean(appState.lastState.current_player && appState.lastState.current_player === appState.playerId);
@@ -700,9 +790,8 @@ function updateSkillControls() {
   refs.useSkillButton.disabled = !availability.canUse;
 }
 
-function myCurrentBet() {
-  const me = ensureArray(appState.lastState.players).find((player) => player.id === appState.playerId);
-  return Number(me?.bet || 0);
+function myPlayerState() {
+  return ensureArray(appState.lastState.players).find((player) => player.id === appState.playerId) || null;
 }
 
 function isConnected() {
@@ -833,7 +922,13 @@ async function switchToNewIdentity() {
 function normalizeState(rawState) {
   return {
     phase: String(rawState?.phase || ""),
+    hand_seq: Number(rawState?.hand_seq || 0),
     total_pot: Number(rawState?.total_pot || 0),
+    pots: ensureArray(rawState?.pots).map((pot) => ({
+      kind: String(pot?.kind || ""),
+      amount: Number(pot?.amount || 0),
+      eligible_count: Number(pot?.eligible_count || 0),
+    })),
     community_cards: ensureArray(rawState?.community_cards).map((card) => String(card)),
     my_hand: ensureArray(rawState?.my_hand).map((card) => String(card)),
     my_skills: ensureArray(rawState?.my_skills).map((skill) => ({
@@ -843,13 +938,26 @@ function normalizeState(rawState) {
     })),
     my_heat: Number(rawState?.my_heat || 0),
     current_player: String(rawState?.current_player || ""),
+    recent_actions: ensureArray(rawState?.recent_actions).map((action) => ({
+      seq: Number(action?.seq || 0),
+      hand_seq: Number(action?.hand_seq || 0),
+      phase: String(action?.phase || ""),
+      player_id: String(action?.player_id || ""),
+      player_name: String(action?.player_name || ""),
+      action: String(action?.action || ""),
+      amount: Number(action?.amount || 0),
+      to: Number(action?.to || 0),
+    })),
     players: ensureArray(rawState?.players).map((player) => ({
       id: String(player?.id || ""),
       name: String(player?.name || ""),
       seat: Number(player?.seat || 0),
       stack: Number(player?.stack || 0),
       bet: Number(player?.bet || 0),
+      total_bet: Number(player?.total_bet ?? player?.totalBet ?? 0),
       status: String(player?.status || "active"),
+      last_action: String(player?.last_action || ""),
+      acted_this_round: Boolean(player?.acted_this_round),
       heat_warning: Boolean(player?.heat_warning),
       hand: ensureArray(player?.hand).map((card) => String(card)),
     })),
@@ -948,8 +1056,25 @@ function parseCardCode(cardCode) {
   return {
     rank,
     symbol: suitMeta.symbol,
+    suitName: suitMeta.name,
     red: suitMeta.red,
   };
+}
+
+function formatCardCodeShort(cardCode) {
+  const parsed = parseCardCode(cardCode);
+  if (!parsed) {
+    return String(cardCode || "-");
+  }
+  return `${parsed.rank}${parsed.symbol}`;
+}
+
+function formatCardCodeVerbose(cardCode) {
+  const parsed = parseCardCode(cardCode);
+  if (!parsed) {
+    return String(cardCode || "-");
+  }
+  return `${parsed.suitName}${parsed.rank}（${parsed.rank}${parsed.symbol}）`;
 }
 
 function displayPhase(phase) {
@@ -1182,6 +1307,112 @@ function statusLabel(status) {
   return STATUS_LABELS[status] || status || "未知";
 }
 
+function actionLabel(action) {
+  const key = String(action || "").toLowerCase();
+  return ACTION_LABELS[key] || key || "-";
+}
+
+function actionChipClass(action) {
+  const key = String(action || "").toLowerCase();
+  if (key === "fold") {
+    return "action action-fold";
+  }
+  if (key === "check") {
+    return "action action-check";
+  }
+  if (key === "call") {
+    return "action action-call";
+  }
+  if (key === "raise") {
+    return "action action-raise";
+  }
+  if (key === "all_in") {
+    return "action action-all-in";
+  }
+  return "action";
+}
+
+function formatActionLogEntry(entry) {
+  const phase = displayPhase(entry?.phase || "");
+  const action = String(entry?.action || "").toLowerCase();
+  const actorName = String(entry?.player_name || "");
+  const actorId = shortId(entry?.player_id || "");
+  const actor = actorName || (actorId !== "-" ? actorId : "玩家");
+  const amount = Number(entry?.amount || 0);
+  const to = Number(entry?.to || 0);
+
+  let detail = `${actor} ${actionLabel(action)}`;
+  if (action === "blind_sb" || action === "blind_bb" || action === "blind") {
+    detail = `${actor} ${actionLabel(action)} ${amount}`;
+  } else if (action === "fold") {
+    detail = `${actor} 弃牌`;
+  } else if (action === "check") {
+    detail = `${actor} 过牌`;
+  } else if (action === "call") {
+    detail = `${actor} 跟注 ${amount}`;
+    if (to > 0) {
+      detail += `，总下注 ${to}`;
+    }
+  } else if (action === "raise") {
+    detail = `${actor} 加注到 ${to}`;
+  } else if (action === "all_in") {
+    detail = `${actor} 全下 ${amount}`;
+    if (to > 0) {
+      detail += `，总下注 ${to}`;
+    }
+  } else if (action === "out") {
+    detail = `${actor} 离桌`;
+  }
+
+  return `[${phase}] ${detail}`;
+}
+
+function calculatePotsFromPlayers(players) {
+  const contributions = ensureArray(players)
+    .map((player) => {
+      const status = normalizeStatus(player?.status || "");
+      return {
+        amount: Number(player?.total_bet || 0),
+        folded: status === "folded" || status === "out",
+      };
+    })
+    .filter((entry) => entry.amount > 0);
+  if (contributions.length === 0) {
+    return [];
+  }
+
+  const levels = [...new Set(contributions.map((entry) => entry.amount))].sort((a, b) => a - b);
+  const pots = [];
+  let previous = 0;
+  levels.forEach((level) => {
+    if (level <= previous) {
+      return;
+    }
+    let playerCount = 0;
+    let eligibleCount = 0;
+    contributions.forEach((entry) => {
+      if (entry.amount < level) {
+        return;
+      }
+      playerCount += 1;
+      if (!entry.folded) {
+        eligibleCount += 1;
+      }
+    });
+    if (playerCount === 0) {
+      return;
+    }
+    pots.push({
+      kind: pots.length === 0 ? "main" : "side",
+      amount: (level - previous) * playerCount,
+      eligible_count: eligibleCount,
+    });
+    previous = level;
+  });
+
+  return pots;
+}
+
 function shouldRenderHiddenCards(status, playerId) {
   if (!playerId || playerId === appState.playerId) {
     return false;
@@ -1252,6 +1483,9 @@ function renderGameToText() {
   const players = ensureArray(appState.lastState.players).slice().sort((a, b) => a.seat - b.seat);
   const visiblePlayers = players.filter((player) => normalizeStatus(player.status) !== "out" || player.id === appState.playerId);
   const seatLayoutByPlayer = buildSeatLayoutByPlayer(visiblePlayers);
+  const pots = ensureArray(appState.lastState.pots).length > 0
+    ? ensureArray(appState.lastState.pots)
+    : calculatePotsFromPlayers(players);
 
   const seats = visiblePlayers.map((player) => {
     const layout = seatLayoutByPlayer.get(player.id) || SEAT_SLOTS.bottom;
@@ -1262,6 +1496,9 @@ function renderGameToText() {
       status: normalizeStatus(player.status),
       stack: Number(player.stack || 0),
       bet: Number(player.bet || 0),
+      total_bet: Number(player.total_bet || 0),
+      last_action: String(player.last_action || ""),
+      acted_this_round: Boolean(player.acted_this_round),
       heat_warning: Boolean(player.heat_warning),
       visible_hand: ensureArray(player.hand),
       layout_slot: layout.name,
@@ -1275,7 +1512,13 @@ function renderGameToText() {
     connection_status: appState.connectionStatus,
     phase: appState.lastState.phase || "",
     current_player: appState.lastState.current_player || "",
+    hand_seq: Number(appState.lastState.hand_seq || 0),
     total_pot: Number(appState.lastState.total_pot || 0),
+    pots: pots.map((pot) => ({
+      kind: String(pot.kind || ""),
+      amount: Number(pot.amount || 0),
+      eligible_count: Number(pot.eligible_count || 0),
+    })),
     my_heat: Number(appState.lastState.my_heat || 0),
     community_cards: ensureArray(appState.lastState.community_cards),
     my_hand: ensureArray(appState.lastState.my_hand),
@@ -1294,6 +1537,16 @@ function renderGameToText() {
     selected_skill: appState.selectedSkillId || "",
     selected_skill_availability: evaluateSkillAvailability(appState.selectedSkillId || ""),
     target_options: appState.targetIds.slice(),
+    recent_actions: ensureArray(appState.lastState.recent_actions).map((entry) => ({
+      seq: Number(entry.seq || 0),
+      hand_seq: Number(entry.hand_seq || 0),
+      phase: String(entry.phase || ""),
+      player_id: String(entry.player_id || ""),
+      player_name: String(entry.player_name || ""),
+      action: String(entry.action || ""),
+      amount: Number(entry.amount || 0),
+      to: Number(entry.to || 0),
+    })),
     seats,
     controls: {
       can_connect: !refs.connectButton.disabled,

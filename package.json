@@ -3,5 +3,8 @@
   "private": true,
   "scripts": {
     "verify:skills": "node \"web/skill_coverage_verify.mjs\""
+  },
+  "dependencies": {
+    "playwright": "^1.58.2"
   }
 }

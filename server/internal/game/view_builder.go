@@ -25,13 +25,15 @@ func BuildGameState(state *GameState, effects *skill.Effects, viewer *PlayerStat
 	players := make([]protocol.PlayerInfo, 0, len(state.Players))
 	for _, p := range state.Players {
 		info := protocol.PlayerInfo{
-			ID:       p.ID,
-			Name:     p.Name,
-			Seat:     p.Seat,
-			Stack:    p.Stack,
-			Bet:      p.Bet,
-			TotalBet: p.TotalBet,
-			Status:   p.Status,
+			ID:             p.ID,
+			Name:           p.Name,
+			Seat:           p.Seat,
+			Stack:          p.Stack,
+			Bet:            p.Bet,
+			TotalBet:       p.TotalBet,
+			Status:         p.Status,
+			LastAction:     p.LastAction,
+			ActedThisRound: p.ActedThisRound,
 		}
 		if p.ID != viewer.ID && p.Heat >= skill.WarningThreshold {
 			info.HeatWarning = true
@@ -48,10 +50,15 @@ func BuildGameState(state *GameState, effects *skill.Effects, viewer *PlayerStat
 	}
 
 	sort.Slice(players, func(i, j int) bool { return players[i].Seat < players[j].Seat })
+	pots := state.Pots
+	if len(pots) == 0 {
+		pots = CalculatePots(state.Players)
+	}
 
 	return protocol.GameStateMsg{
 		Phase:          string(state.Phase),
 		TotalPot:       totalPot(state),
+		Pots:           toPotInfo(pots),
 		CommunityCards: cardStrings(community),
 		MyHand:         cardStrings(viewer.Hand),
 		MySkills:       toSkillInfo(viewer.Skills),
@@ -59,6 +66,8 @@ func BuildGameState(state *GameState, effects *skill.Effects, viewer *PlayerStat
 		Players:        players,
 		CurrentPlayer:  state.CurrentPlayer,
 		DealerSeat:     state.DealerSeat,
+		HandSeq:        state.HandSeq,
+		RecentActions:  toActionInfo(state.RecentActions),
 	}
 }
 
@@ -91,6 +100,39 @@ func toSkillInfo(skills []skill.Card) []protocol.SkillInfo {
 			ID:   s.ID,
 			Name: s.Name,
 			Cost: s.Cost,
+		})
+	}
+	return out
+}
+
+func toPotInfo(pots []Pot) []protocol.PotInfo {
+	out := make([]protocol.PotInfo, 0, len(pots))
+	for idx, p := range pots {
+		kind := "side"
+		if idx == 0 {
+			kind = "main"
+		}
+		out = append(out, protocol.PotInfo{
+			Kind:          kind,
+			Amount:        p.Amount,
+			EligibleCount: len(p.Eligible),
+		})
+	}
+	return out
+}
+
+func toActionInfo(actions []ActionRecord) []protocol.ActionInfo {
+	out := make([]protocol.ActionInfo, 0, len(actions))
+	for _, a := range actions {
+		out = append(out, protocol.ActionInfo{
+			Seq:        a.Seq,
+			HandSeq:    a.HandSeq,
+			Phase:      string(a.Phase),
+			PlayerID:   a.PlayerID,
+			PlayerName: a.PlayerName,
+			Action:     a.Action,
+			Amount:     a.Amount,
+			To:         a.To,
 		})
 	}
 	return out

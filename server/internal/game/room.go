@@ -20,6 +20,7 @@ const (
 	minPlayersToStart = 2
 	targetPlayers     = 4
 	initialStack      = 1000
+	maxRecentActions  = 12
 	actionTimeout     = 30 * time.Second
 	nextHandDelay     = 3 * time.Second
 	evictTimeout      = 8 * time.Second
@@ -133,6 +134,10 @@ func (r *Room) handleJoin(evt Event) bool {
 		playerID = uuid.NewString()
 	}
 	player := r.state.PlayerByID(playerID)
+	if player == nil && connectedHumansBeforeJoin == 0 && len(r.state.Players) > 0 {
+		r.resetToEmptyRoom()
+	}
+	player = r.state.PlayerByID(playerID)
 	if player == nil {
 		if len(r.state.Players) >= maxPlayers {
 			r.reply(evt, "", errors.New("room full"))
@@ -203,6 +208,8 @@ func (r *Room) handleLeave(evt Event) bool {
 	if player.IsInHand() {
 		player.Status = StatusOut
 		player.ActedThisRound = true
+		player.LastAction = "out"
+		r.appendActionRecord(player, "out", 0, player.Bet)
 		if evt.PlayerID == r.state.CurrentPlayer {
 			r.afterAction()
 		} else if r.remainingInHand() <= 1 {
@@ -411,14 +418,16 @@ func (r *Room) sendActionRequest() {
 			CanUseSkill:  canUseSkill,
 			TimeoutSec:   int(actionTimeout.Seconds()),
 		})
+		r.state.ActionRequestedAt = time.Now()
 		return
 	}
 }
 
 func validActions(p *PlayerState, toCall int, minRaise int) []string {
 	var actions []string
+	actions = append(actions, "fold")
 	if toCall > 0 {
-		actions = append(actions, "fold", "call")
+		actions = append(actions, "call")
 	} else {
 		actions = append(actions, "check")
 	}
@@ -615,6 +624,7 @@ func (r *Room) endHand() {
 		p.Heat = skill.DecayHeat(p.Heat)
 		p.Bet = 0
 		p.TotalBet = 0
+		p.LastAction = ""
 		p.Hand = nil
 		p.ActedThisRound = false
 		p.SkillUsedThisTurn = false
@@ -664,6 +674,7 @@ func (r *Room) startHand() {
 	r.state.Phase = PhaseDealing
 	r.state.Community = nil
 	r.state.Pots = nil
+	r.state.RecentActions = nil
 	r.effects.ClearHand()
 
 	r.state.Deck = poker.NewDeck()
@@ -680,6 +691,7 @@ func (r *Room) startHand() {
 	for _, p := range r.state.Players {
 		if p.Stack <= 0 {
 			p.Status = StatusOut
+			p.LastAction = ""
 			continue
 		}
 		p.ResetForHand()
@@ -736,26 +748,35 @@ func (r *Room) postBlind(p *PlayerState, blind int) {
 	p.Stack -= amount
 	p.Bet += amount
 	p.TotalBet += amount
+	p.LastAction = "blind"
 	if p.Stack == 0 {
 		p.Status = StatusAllIn
 	}
+	action := "blind"
+	if blind == r.state.SmallBlind {
+		action = "blind_sb"
+	} else if blind == r.state.BigBlind {
+		action = "blind_bb"
+	}
+	r.appendActionRecord(p, action, amount, p.Bet)
 }
 
 func (r *Room) applyAction(p *PlayerState, action protocol.ActionMsg) error {
 	toCall := r.state.CurrentBet - p.Bet
 	switch action.Action {
 	case "fold":
-		if toCall <= 0 {
-			return errors.New("nothing to fold")
-		}
 		p.Status = StatusFolded
 		p.ActedThisRound = true
+		p.LastAction = "fold"
+		r.appendActionRecord(p, "fold", 0, p.Bet)
 		return nil
 	case "check":
 		if toCall != 0 {
 			return errors.New("cannot check")
 		}
 		p.ActedThisRound = true
+		p.LastAction = "check"
+		r.appendActionRecord(p, "check", 0, p.Bet)
 		return nil
 	case "call":
 		if toCall <= 0 {
@@ -766,6 +787,8 @@ func (r *Room) applyAction(p *PlayerState, action protocol.ActionMsg) error {
 			return err
 		}
 		p.ActedThisRound = true
+		p.LastAction = "call"
+		r.appendActionRecord(p, "call", pay, p.Bet)
 		return nil
 	case "raise":
 		if action.Amount <= r.state.CurrentBet {
@@ -786,6 +809,8 @@ func (r *Room) applyAction(p *PlayerState, action protocol.ActionMsg) error {
 		r.state.MinRaise = raiseAmt
 		r.resetActedExcept(p.ID)
 		p.ActedThisRound = true
+		p.LastAction = "raise"
+		r.appendActionRecord(p, "raise", needed, action.Amount)
 		return nil
 	case "all_in":
 		if p.Stack <= 0 {
@@ -804,6 +829,8 @@ func (r *Room) applyAction(p *PlayerState, action protocol.ActionMsg) error {
 			}
 		}
 		p.ActedThisRound = true
+		p.LastAction = "all_in"
+		r.appendActionRecord(p, "all_in", allin, p.Bet)
 		return nil
 	default:
 		return errors.New("unknown action")
@@ -876,6 +903,8 @@ func (r *Room) checkTimeouts() bool {
 		player := r.state.PlayerByID(id)
 		if player != nil && player.CanAct() {
 			player.Status = StatusFolded
+			player.LastAction = "fold"
+			r.appendActionRecord(player, "fold", 0, player.Bet)
 			changed = true
 			if id == r.state.CurrentPlayer {
 				currentFolded = true
@@ -883,6 +912,26 @@ func (r *Room) checkTimeouts() bool {
 		}
 		delete(r.disconnected, id)
 	}
+
+	// Timeout for connected players who haven't acted
+	if !r.state.ActionRequestedAt.IsZero() && r.state.CurrentPlayer != "" {
+		player := r.state.PlayerByID(r.state.CurrentPlayer)
+		if player != nil && player.CanAct() && !player.IsBot {
+			if now.Sub(r.state.ActionRequestedAt) >= actionTimeout {
+				toCall := r.state.CurrentBet - player.Bet
+				if toCall <= 0 {
+					_ = r.applyAction(player, protocol.ActionMsg{Action: "check"})
+				} else {
+					_ = r.applyAction(player, protocol.ActionMsg{Action: "fold"})
+				}
+				player.SkillUsedThisTurn = false
+				r.state.ActionRequestedAt = time.Time{}
+				r.afterAction()
+				return true
+			}
+		}
+	}
+
 	if changed {
 		if r.remainingInHand() <= 1 {
 			r.finishHandByFold()
@@ -1086,6 +1135,27 @@ func (r *Room) randomCardExcluding(known map[string]bool) poker.Card {
 	}
 }
 
+func (r *Room) appendActionRecord(player *PlayerState, action string, amount int, to int) {
+	if player == nil {
+		return
+	}
+	r.state.ActionSeq++
+	r.state.RecentActions = append(r.state.RecentActions, ActionRecord{
+		Seq:        r.state.ActionSeq,
+		HandSeq:    r.state.HandSeq,
+		Phase:      r.state.Phase,
+		PlayerID:   player.ID,
+		PlayerName: player.Name,
+		Action:     action,
+		Amount:     amount,
+		To:         to,
+	})
+	if len(r.state.RecentActions) <= maxRecentActions {
+		return
+	}
+	r.state.RecentActions = append([]ActionRecord{}, r.state.RecentActions[len(r.state.RecentActions)-maxRecentActions:]...)
+}
+
 func minInt(a, b int) int {
 	if a < b {
 		return a
@@ -1166,6 +1236,7 @@ func (r *Room) resetForFreshSession(playerID string) {
 	player.Stack = initialStack
 	player.Bet = 0
 	player.TotalBet = 0
+	player.LastAction = ""
 	player.Status = StatusActive
 	player.IsBot = false
 	player.Aggression = 0
@@ -1185,6 +1256,8 @@ func (r *Room) resetForFreshSession(playerID string) {
 	r.state.Deck = nil
 	r.state.Community = nil
 	r.state.Pots = nil
+	r.state.RecentActions = nil
+	r.state.ActionSeq = 0
 	r.state.CurrentPlayer = ""
 	r.state.CurrentBet = 0
 	r.state.MinRaise = r.state.BigBlind
@@ -1199,6 +1272,8 @@ func (r *Room) resetToEmptyRoom() {
 	r.state.Deck = nil
 	r.state.Community = nil
 	r.state.Pots = nil
+	r.state.RecentActions = nil
+	r.state.ActionSeq = 0
 	r.state.CurrentPlayer = ""
 	r.state.CurrentBet = 0
 	r.state.MinRaise = r.state.BigBlind
@@ -1257,7 +1332,13 @@ func (r *Room) botAct(player *PlayerState) bool {
 	if err := r.applyAction(player, action); err != nil {
 		action = r.fallbackBotAction(player)
 		if err := r.applyAction(player, action); err != nil {
-			_ = r.applyAction(player, protocol.ActionMsg{Action: "fold"})
+			if err2 := r.applyAction(player, protocol.ActionMsg{Action: "fold"}); err2 != nil {
+				// All actions failed — force fold to prevent infinite loop
+				player.Status = StatusFolded
+				player.ActedThisRound = true
+				player.LastAction = "fold"
+				r.appendActionRecord(player, "fold", 0, player.Bet)
+			}
 		}
 	}
 	player.SkillUsedThisTurn = false

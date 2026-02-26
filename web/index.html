@@ -44,6 +44,8 @@
             <span id="phaseText" class="meta-pill">阶段: -</span>
             <span id="turnText" class="meta-pill">当前行动: -</span>
             <span id="potText" class="meta-pill">底池: 0</span>
+            <span id="mainPotText" class="meta-pill">主池: 0</span>
+            <span id="sidePotsText" class="meta-pill">边池: -</span>
             <span id="heatText" class="meta-pill">怀疑值: 0</span>
           </div>
 
@@ -69,7 +71,11 @@
             <h2>行动</h2>
             <div class="action-stats">
               <p id="toCallText">需跟注: 0</p>
-              <p id="minRaiseText">最小加注: 0</p>
+              <p id="minRaiseText">最小加注增量: 0</p>
+              <p id="raiseToText">最小加注到: 0</p>
+              <p id="maxRaiseText">加注上限: 0</p>
+              <p id="myStreetBetText">本轮已下注: 0</p>
+              <p id="myInvestedText">本局总投入: 0</p>
             </div>
 
             <div class="action-buttons">
@@ -109,6 +115,11 @@
           <section class="panel status-panel">
             <h2>状态</h2>
             <p id="statusMirror" class="status-mirror">状态: 未连接</p>
+          </section>
+
+          <section class="panel log-panel">
+            <h2>最近行动</h2>
+            <ul id="actionLogList" class="action-log-list"></ul>
           </section>
         </aside>
       </section>

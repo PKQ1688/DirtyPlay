@@ -19,19 +19,33 @@ const (
 )
 
 type GameState struct {
-	Phase         Phase
-	Deck          []poker.Card
-	Community     []poker.Card
-	Players       []*PlayerState
-	Pots          []Pot
-	DealerSeat    int
-	CurrentBet    int
-	MinRaise      int
-	CurrentPlayer string
-	SmallBlind    int
-	BigBlind      int
-	NextHandAt    time.Time
-	HandSeq       int64
+	Phase             Phase
+	Deck              []poker.Card
+	Community         []poker.Card
+	Players           []*PlayerState
+	Pots              []Pot
+	RecentActions     []ActionRecord
+	ActionSeq         int64
+	DealerSeat        int
+	CurrentBet        int
+	MinRaise          int
+	CurrentPlayer     string
+	SmallBlind        int
+	BigBlind          int
+	NextHandAt        time.Time
+	HandSeq           int64
+	ActionRequestedAt time.Time
+}
+
+type ActionRecord struct {
+	Seq        int64
+	HandSeq    int64
+	Phase      Phase
+	PlayerID   string
+	PlayerName string
+	Action     string
+	Amount     int
+	To         int
 }
 
 func (s *GameState) PlayerByID(id string) *PlayerState {

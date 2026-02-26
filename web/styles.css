@@ -401,6 +401,37 @@ button:disabled {
   background: #9fe0c2;
 }
 
+.meta-chip.action {
+  color: #d8e7ff;
+  border-color: #5f80a7;
+  background: rgba(26, 45, 70, 0.9);
+}
+
+.meta-chip.action-fold {
+  color: #40191d;
+  border-color: #e48b95;
+  background: #f6b3ba;
+}
+
+.meta-chip.action-check {
+  color: #0d2f4f;
+  border-color: #7fb5e8;
+  background: #acd5ff;
+}
+
+.meta-chip.action-call {
+  color: #0b3942;
+  border-color: #76b7bf;
+  background: #9dd4dc;
+}
+
+.meta-chip.action-raise,
+.meta-chip.action-all-in {
+  color: #412903;
+  border-color: #d5aa4f;
+  background: #f4c566;
+}
+
 .seat-cards {
   display: flex;
   gap: 5px;
@@ -516,6 +547,26 @@ button:disabled {
 
 .status-mirror[data-kind="error"] {
   color: var(--error);
+}
+
+.action-log-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.action-log-list li {
+  padding: 7px 9px;
+  border-radius: 9px;
+  border: 1px solid #2e4d6e;
+  background: rgba(7, 16, 27, 0.78);
+  color: #c8daf4;
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .orientation-tip {
