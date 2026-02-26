@@ -27,21 +27,12 @@ DirtyPlay/
 │   ├── project.godot            # Godot 项目配置
 │   ├── scenes/                  # 场景文件
 │   │   ├── main_menu.tscn       # 主菜单
-│   │   ├── game_table.tscn      # 牌桌场景
-│   │   └── components/          # 可复用组件
-│   │       ├── card.tscn        # 卡牌组件
-│   │       ├── player_seat.tscn # 玩家座位
-│   │       └── skill_card.tscn  # 技能牌
+│   │   └── game_table.tscn      # 牌桌场景
 │   ├── scripts/                 # GDScript 脚本
 │   │   ├── autoload/            # 全局单例
 │   │   │   ├── game_manager.gd  # 游戏状态管理
 │   │   │   └── network.gd       # WebSocket 通信
-│   │   ├── game/                # 游戏逻辑
 │   │   └── ui/                  # UI 控制
-│   └── assets/                  # 游戏资源
-│       ├── cards/               # 扑克牌素材
-│       ├── skills/              # 技能牌图标
-│       └── fonts/               # 字体文件
 │
 ├── server/                      # Go 服务端
 │   ├── go.mod                   # Go 模块配置
@@ -75,6 +66,12 @@ DirtyPlay/
 │       │   └── types.go         # 类型定义
 │       └── ai/                  # AI 系统
 │           └── bot.go           # AI 玩家逻辑
+│
+├── web/                         # 浏览器可视化客户端与验证脚本
+│   ├── index.html               # 页面入口
+│   ├── app.js                   # UI 与交互逻辑
+│   ├── styles.css               # 样式
+│   └── skill_coverage_verify.mjs # Playwright 技能覆盖验证
 │
 └── docs/                        # 文档
     └── game_plan.md             # 详细技术方案
@@ -221,8 +218,8 @@ go build -o bin/server cmd/server/main.go
 
 1. 在 `server/internal/skill/skill.go` 定义技能类型
 2. 在 `server/internal/skill/effects.go` 实现技能效果
-3. 在 `client/scripts/game/skill_manager.gd` 添加客户端逻辑
-4. 添加技能图标到 `client/assets/skills/`
+3. 在 `client/scripts/ui/game_table.gd` 增加技能选择与发送逻辑
+4. 在 `client/scripts/autoload/game_manager.gd` 调整 `use_skill` 请求字段（如需要）
 
 ### 调试技巧
 

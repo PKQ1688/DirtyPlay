@@ -1,5 +1,6 @@
 # Go
 server/bin/
+server/server
 *.exe
 *.exe~
 *.dll
