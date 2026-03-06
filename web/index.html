@@ -9,31 +9,28 @@
   <body>
     <main class="app">
       <header class="page-header">
-        <h1>DirtyPlay Web</h1>
-        <p>千术德州扑克 - 可视化牌桌</p>
+        <h1>DirtyPlay</h1>
+        <p>千术德州扑克</p>
       </header>
 
       <section class="panel connect-panel">
-        <h2>连接</h2>
         <div class="connect-grid">
-          <label class="field">
-            <span>服务器</span>
-            <input id="serverInput" type="text" inputmode="url" />
-          </label>
           <label class="field">
             <span>房间</span>
             <input id="roomInput" type="text" value="room1" />
           </label>
           <label class="field">
             <span>昵称</span>
-            <input id="nameInput" type="text" placeholder="玩家昵称" />
+            <input id="nameInput" type="text" placeholder="输入你的昵称" />
           </label>
+          <div class="join-col">
+            <button id="joinButton" type="button" class="join-btn">加入游戏</button>
+          </div>
         </div>
-        <div class="connect-row">
-          <button id="connectButton" type="button">连接</button>
-          <button id="joinButton" type="button" disabled>加入</button>
-          <button id="resetIdentityButton" type="button" class="secondary-btn">切换新玩家</button>
-          <span id="statusText" class="status-text" data-kind="ok">状态: 未连接</span>
+        <div class="connect-footer">
+          <span id="statusText" class="status-text" data-kind="ok">未连接</span>
+          <button id="resetIdentityButton" type="button" class="ghost-btn">切换新玩家</button>
+          <button id="connectButton" type="button" class="ghost-btn" style="display:none">连接</button>
         </div>
       </section>
 

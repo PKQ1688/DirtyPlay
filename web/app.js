@@ -99,7 +99,7 @@ const OTHER_SEAT_SLOTS_BY_COUNT = {
 };
 
 const refs = {
-  serverInput: document.getElementById("serverInput"),
+  serverInput: document.getElementById("serverInput") || { value: "" },
   roomInput: document.getElementById("roomInput"),
   nameInput: document.getElementById("nameInput"),
   connectButton: document.getElementById("connectButton"),
@@ -164,6 +164,7 @@ setDefaultServerUrl();
 if (appState.playerName) {
   refs.nameInput.value = appState.playerName;
 }
+refs.joinButton.disabled = false;
 setStatus("未连接", false);
 renderCommunityCards([], []);
 renderHandCards([], []);
@@ -912,8 +913,8 @@ async function switchToNewIdentity() {
   try {
     await disconnectSocket();
     clearIdentity();
-    refs.joinButton.disabled = true;
-    setStatus("已切换新玩家，请先连接再加入", false);
+    refs.joinButton.disabled = false;
+    setStatus("已切换新玩家，输入昵称后加入", false);
   } finally {
     appState.joining = false;
   }
