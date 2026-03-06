@@ -21,6 +21,7 @@ type AckMsg struct {
 	Success  bool   `json:"success"`
 	Error    string `json:"error,omitempty"`
 	PlayerID string `json:"player_id,omitempty"`
+	RoomID   string `json:"room_id,omitempty"`
 }
 
 type ErrorMsg struct {

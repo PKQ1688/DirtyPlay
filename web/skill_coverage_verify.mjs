@@ -64,7 +64,7 @@ function assertWithReason(condition, reason) {
 async function waitForJoined(page) {
   await page.waitForFunction(() => {
     const statusText = document.querySelector("#statusText")?.textContent || "";
-    return statusText.includes("已加入");
+    return statusText.includes("已加入") || statusText.includes("已创建");
   }, { timeout: 15000 });
 
   await page.waitForFunction(() => {
@@ -123,17 +123,20 @@ function pickSkillId(snapshot) {
   return String(skills[0]?.id || "");
 }
 
-async function openAndJoin(page, attempt, roomId) {
+async function openAndJoin(page, attempt, _roomId) {
   await page.goto(PAGE_URL, { waitUntil: "domcontentloaded", timeout: 15000 });
-  await page.fill("#roomInput", roomId);
-  await page.fill("#nameInput", `Cov${attempt}`);
-  await page.click("#connectButton");
+  await page.fill("#lobbyNameInput", `Cov${attempt}`);
+  await page.click("#createRoomBtn");
+  // Wait until we land on the game screen (room_created received)
   await page.waitForFunction(() => {
-    const statusText = document.querySelector("#statusText")?.textContent || "";
-    const joinDisabled = Boolean(document.querySelector("#joinButton")?.disabled);
-    return statusText.includes("已连接") && !joinDisabled;
-  }, { timeout: 10000 });
-  await page.click("#joinButton");
+    const gs = document.getElementById("gameScreen");
+    return gs && gs.style.display !== "none";
+  }, { timeout: 15000 });
+  // Add 3 bots so the game can start (need ≥2 players)
+  for (let i = 0; i < 3; i++) {
+    await page.click("#addBotBtn");
+    await page.waitForTimeout(200);
+  }
   await waitForJoined(page);
 }
 

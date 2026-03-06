@@ -99,12 +99,27 @@ const OTHER_SEAT_SLOTS_BY_COUNT = {
 };
 
 const refs = {
-  serverInput: document.getElementById("serverInput") || { value: "" },
-  roomInput: document.getElementById("roomInput"),
-  nameInput: document.getElementById("nameInput"),
-  connectButton: document.getElementById("connectButton"),
-  joinButton: document.getElementById("joinButton"),
-  resetIdentityButton: document.getElementById("resetIdentityButton"),
+  serverInput: { value: "" },
+  roomInput: { value: "" },
+  nameInput: { value: "" },
+  connectButton: document.getElementById("connectButton") || { disabled: false },
+  joinButton: document.getElementById("joinButton") || { disabled: false },
+  resetIdentityButton: document.getElementById("resetIdentityButton") || {},
+  // Lobby
+  lobbyScreen: document.getElementById("lobbyScreen"),
+  gameScreen: document.getElementById("gameScreen"),
+  lobbyNameInput: document.getElementById("lobbyNameInput"),
+  createRoomBtn: document.getElementById("createRoomBtn"),
+  joinRoomBtn: document.getElementById("joinRoomBtn"),
+  roomCodeInput: document.getElementById("roomCodeInput"),
+  lobbyError: document.getElementById("lobbyError"),
+  backToLobbyBtn: document.getElementById("backToLobbyBtn"),
+  roomCodeBadge: document.getElementById("roomCodeBadge"),
+  waitingRoom: document.getElementById("waitingRoom"),
+  waitingCode: document.getElementById("waitingCode"),
+  copyCodeBtn: document.getElementById("copyCodeBtn"),
+  addBotBtn: document.getElementById("addBotBtn"),
+  waitingPlayerCount: document.getElementById("waitingPlayerCount"),
   statusText: document.getElementById("statusText"),
   statusMirror: document.getElementById("statusMirror"),
   phaseText: document.getElementById("phaseText"),
@@ -155,16 +170,20 @@ const appState = {
   connectionStatus: "未连接",
   lastSentType: "",
   lastSkillAttempt: "",
+  screen: "lobby",
+  currentRoomCode: "",
+  currentRoomId: "",
+  _pendingJoinCode: "",
 };
 
 const uiTimers = [];
 setInterval(() => stepUiTimers(UI_TICK_MS), UI_TICK_MS);
 
-setDefaultServerUrl();
+// Initialize with lobby shown
+showLobby();
 if (appState.playerName) {
-  refs.nameInput.value = appState.playerName;
+  refs.lobbyNameInput.value = appState.playerName;
 }
-refs.joinButton.disabled = false;
 setStatus("未连接", false);
 renderCommunityCards([], []);
 renderHandCards([], []);
@@ -174,15 +193,18 @@ renderActionLog([]);
 updateActionArea();
 updateSkillControls();
 
-refs.connectButton.addEventListener("click", () => {
-  void connectToServer(false);
+// Lobby events
+refs.createRoomBtn.addEventListener("click", () => { void createRoom(); });
+refs.joinRoomBtn.addEventListener("click", () => { void joinByCode(); });
+refs.addBotBtn.addEventListener("click", addBot);
+refs.backToLobbyBtn.addEventListener("click", () => { void disconnectSocket(); showLobby(); });
+refs.copyCodeBtn.addEventListener("click", () => {
+  navigator.clipboard.writeText(appState.currentRoomCode).catch(() => {});
 });
-refs.joinButton.addEventListener("click", () => {
-  void joinRoom();
-});
-refs.resetIdentityButton.addEventListener("click", () => {
-  void switchToNewIdentity();
-});
+refs.roomCodeInput.addEventListener("input", (e) => { e.target.value = e.target.value.toUpperCase(); });
+refs.lobbyNameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { void createRoom(); } });
+
+// Game events
 refs.foldButton.addEventListener("click", () => sendAction("fold"));
 refs.checkButton.addEventListener("click", () => sendAction("check"));
 refs.callButton.addEventListener("click", () => sendAction("call"));
@@ -199,28 +221,17 @@ window.render_game_to_text = renderGameToText;
 window.advanceTime = advanceTime;
 
 function setDefaultServerUrl() {
-  if (window.location.host) {
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    refs.serverInput.value = `${protocol}://${window.location.host}/ws`;
-    return;
-  }
-  refs.serverInput.value = "ws://localhost:8080/ws";
+  // No-op: URL is now computed dynamically in buildServerUrl()
 }
 
 async function connectToServer(forceReconnect = false) {
-  const url = refs.serverInput.value.trim();
-  if (!url) {
-    setStatus("请输入服务器地址", true);
-    return false;
-  }
+  const url = buildServerUrl();
 
   if (forceReconnect) {
     await disconnectSocket();
   }
 
   if (appState.ws && appState.ws.readyState === WebSocket.OPEN) {
-    refs.joinButton.disabled = false;
-    setStatus("已连接", false);
     return true;
   }
 
@@ -232,22 +243,15 @@ async function connectToServer(forceReconnect = false) {
     return opened;
   }
 
-  setStatus(`正在连接 ${url} ...`, false);
+  setStatus(`正在连接...`, false);
   const ws = new WebSocket(url);
   appState.ws = ws;
 
-  ws.addEventListener("open", () => {
-    setStatus("已连接", false);
-    refs.joinButton.disabled = false;
-  });
-
   ws.addEventListener("close", () => {
-    refs.joinButton.disabled = true;
     setStatus("连接已断开", true);
   });
 
   ws.addEventListener("error", () => {
-    refs.joinButton.disabled = true;
     setStatus("网络连接错误", true);
   });
 
@@ -260,6 +264,14 @@ async function connectToServer(forceReconnect = false) {
     setStatus("连接超时", true);
   }
   return opened;
+}
+
+function buildServerUrl() {
+  if (window.location.host) {
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    return `${protocol}://${window.location.host}/ws`;
+  }
+  return "ws://localhost:8080/ws";
 }
 
 async function joinRoom() {
@@ -294,6 +306,88 @@ async function joinRoom() {
     sendMessage("join", payload);
   } finally {
     appState.joining = false;
+  }
+}
+
+// ── Lobby / screen helpers ──
+
+function showLobby() {
+  appState.screen = "lobby";
+  refs.lobbyScreen.style.display = "";
+  refs.gameScreen.style.display = "none";
+  showLobbyError("");
+}
+
+function showGame(roomId, code) {
+  appState.screen = "game";
+  appState.currentRoomId = roomId;
+  appState.currentRoomCode = code;
+  refs.lobbyScreen.style.display = "none";
+  refs.gameScreen.style.display = "";
+  refs.roomCodeBadge.textContent = code || "";
+  refs.waitingCode.textContent = code || "";
+}
+
+function showLobbyError(msg) {
+  refs.lobbyError.textContent = msg;
+  refs.lobbyError.style.display = msg ? "" : "none";
+}
+
+async function ensureConnected() {
+  return connectToServer(false);
+}
+
+async function createRoom() {
+  const name = refs.lobbyNameInput.value.trim() || "玩家";
+  showLobbyError("");
+  const connected = await ensureConnected();
+  if (!connected) {
+    showLobbyError("无法连接到服务器");
+    return;
+  }
+  if (name) {
+    appState.playerName = name;
+    localStorage.setItem(PLAYER_NAME_KEY, name);
+  }
+  sendMessage("create_room", { name });
+}
+
+async function joinByCode() {
+  const code = refs.roomCodeInput.value.trim().toUpperCase();
+  if (code.length !== 6) {
+    showLobbyError("请输入6位邀请码");
+    return;
+  }
+  const name = refs.lobbyNameInput.value.trim() || "玩家";
+  showLobbyError("");
+  const connected = await ensureConnected();
+  if (!connected) {
+    showLobbyError("无法连接到服务器");
+    return;
+  }
+  if (name) {
+    appState.playerName = name;
+    localStorage.setItem(PLAYER_NAME_KEY, name);
+  }
+  // Store code so ack handler can display it
+  appState._pendingJoinCode = code;
+  sendMessage("join_room", {
+    code,
+    name,
+    player_id: appState.playerId || "",
+  });
+}
+
+function addBot() {
+  sendMessage("add_bot", {});
+}
+
+function updateWaitingRoom(state) {
+  const isWaiting = state.phase === "waiting";
+  refs.waitingRoom.style.display = isWaiting ? "" : "none";
+  if (isWaiting) {
+    const total = ensureArray(state.players).length || 0;
+    refs.waitingPlayerCount.textContent = `当前 ${total} 人 / 最多 6 人，满2人自动开局`;
   }
 }
 
@@ -362,10 +456,24 @@ function onMessage(raw) {
 
   const payload = msg.payload || {};
   switch (msg.type) {
+    case "room_created":
+      // payload: { room_id, code, player_id }
+      if (payload.player_id) {
+        appState.playerId = String(payload.player_id);
+        localStorage.setItem(PLAYER_ID_KEY, appState.playerId);
+      }
+      showGame(String(payload.room_id || ""), String(payload.code || ""));
+      setStatus("已创建房间，等待玩家加入", false);
+      break;
+
     case "ack":
       if (payload.success === false) {
         const mappedError = friendlyServerError(payload.error || "");
-        setStatus(`请求失败: ${mappedError}`, true);
+        if (appState.screen === "lobby") {
+          showLobbyError(mappedError);
+        } else {
+          setStatus(`请求失败: ${mappedError}`, true);
+        }
         appState.lastSentType = "";
         return;
       }
@@ -373,12 +481,20 @@ function onMessage(raw) {
       if (payload.player_id) {
         appState.playerId = String(payload.player_id);
         localStorage.setItem(PLAYER_ID_KEY, appState.playerId);
-        const joinName = refs.nameInput.value.trim();
-        if (joinName) {
-          appState.playerName = joinName;
-          localStorage.setItem(PLAYER_NAME_KEY, joinName);
+      }
+      if (appState.screen === "lobby" && payload.success) {
+        // join_room success — enter game screen using the code the user typed
+        const pendingCode = appState._pendingJoinCode || "";
+        appState._pendingJoinCode = "";
+        showGame(String(payload.room_id || ""), pendingCode);
+        setStatus("已加入房间", false);
+        if (appState.lastState.phase) {
+          syncStatusWithState(appState.lastState);
         }
-        setStatus(`已加入，玩家ID ${shortId(appState.playerId)}`, false);
+      } else {
+        if (payload.player_id) {
+          setStatus(`已加入，玩家ID ${shortId(appState.playerId)}`, false);
+        }
       }
       if (appState.lastSentType === "skill") {
         appState.lastSkillAttempt = "";
@@ -423,6 +539,7 @@ function renderState(rawState) {
   const state = normalizeState(rawState);
   appState.lastState = state;
   const pots = ensureArray(state.pots).length > 0 ? state.pots : calculatePotsFromPlayers(state.players);
+  syncStatusWithState(state);
 
   const currentPlayerName = displayPlayerName(state.current_player, state.players);
   refs.phaseText.textContent = `阶段: ${displayPhase(state.phase)}`;
@@ -444,6 +561,7 @@ function renderState(rawState) {
 
   updateActionArea();
   updateSkillControls();
+  updateWaitingRoom(state);
 }
 
 function renderPotBreakdown(pots, totalPot) {
@@ -896,6 +1014,26 @@ function setStatus(text, isError) {
   refs.statusMirror.textContent = composed;
   refs.statusText.dataset.kind = isError ? "error" : "ok";
   refs.statusMirror.dataset.kind = isError ? "error" : "ok";
+}
+
+function syncStatusWithState(state) {
+  if (!shouldAutoSyncStatus(appState.connectionStatus)) {
+    return;
+  }
+  if (state.phase === "waiting") {
+    setStatus("已进入房间，等待开局", false);
+    return;
+  }
+  setStatus(`牌局进行中：${displayPhase(state.phase)}`, false);
+}
+
+function shouldAutoSyncStatus(text) {
+  const value = String(text || "");
+  return value === "已创建房间，等待玩家加入"
+    || value === "已加入房间"
+    || value === "已进入房间，等待开局"
+    || value.startsWith("牌局进行中：")
+    || value.startsWith("已加入，玩家ID ");
 }
 
 function clearIdentity() {
@@ -1487,6 +1625,8 @@ function renderGameToText() {
   const pots = ensureArray(appState.lastState.pots).length > 0
     ? ensureArray(appState.lastState.pots)
     : calculatePotsFromPlayers(players);
+  const canCreateRoom = appState.screen === "lobby" && Boolean(refs.createRoomBtn) && !refs.createRoomBtn.disabled;
+  const canJoinRoom = appState.screen === "lobby" && Boolean(refs.joinRoomBtn) && !refs.joinRoomBtn.disabled;
 
   const seats = visiblePlayers.map((player) => {
     const layout = seatLayoutByPlayer.get(player.id) || SEAT_SLOTS.bottom;
@@ -1550,8 +1690,10 @@ function renderGameToText() {
     })),
     seats,
     controls: {
-      can_connect: !refs.connectButton.disabled,
-      can_join: !refs.joinButton.disabled,
+      can_connect: canCreateRoom,
+      can_join: canJoinRoom,
+      create_room_enabled: canCreateRoom,
+      join_room_enabled: canJoinRoom,
       fold_enabled: !refs.foldButton.disabled,
       check_enabled: !refs.checkButton.disabled,
       call_enabled: !refs.callButton.disabled,

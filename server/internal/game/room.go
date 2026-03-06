@@ -90,9 +90,6 @@ func (r *Room) EventLoop() {
 				r.sendActionRequest()
 			}
 			if r.state.Phase == PhaseWaiting {
-				if r.ensureBots(targetPlayers) {
-					r.broadcastViews()
-				}
 				if r.humanCount() > 0 && r.state.ActiveCount() >= 2 {
 					r.tryStartHand()
 					r.broadcastViews()
@@ -113,6 +110,8 @@ func (r *Room) handleEvent(evt Event) bool {
 		return r.handleAction(evt)
 	case "skill":
 		return r.handleSkill(evt)
+	case "add_bot":
+		return r.addOneBot()
 	default:
 		return false
 	}
@@ -134,7 +133,8 @@ func (r *Room) handleJoin(evt Event) bool {
 		playerID = uuid.NewString()
 	}
 	player := r.state.PlayerByID(playerID)
-	if player == nil && connectedHumansBeforeJoin == 0 && len(r.state.Players) > 0 {
+	existingPlayer := player != nil
+	if !existingPlayer && connectedHumansBeforeJoin == 0 && len(r.state.Players) > 0 {
 		r.resetToEmptyRoom()
 	}
 	player = r.state.PlayerByID(playerID)
@@ -163,14 +163,22 @@ func (r *Room) handleJoin(evt Event) bool {
 			player.Status = StatusActive
 		}
 		r.state.Players = append(r.state.Players, player)
-	} else if join.Name != "" {
-		player.Name = join.Name
+	} else {
+		if join.Name != "" {
+			player.Name = join.Name
+		}
+		if r.state.Phase == PhaseWaiting && player.Stack > 0 {
+			player.Status = StatusActive
+			player.LastAction = ""
+			player.ActedThisRound = false
+			player.SkillUsedThisTurn = false
+		}
 	}
 	r.conns[playerID] = evt.Conn
 	delete(r.disconnected, playerID)
 	player.DisconnectedAt = time.Time{}
 
-	if connectedHumansBeforeJoin == 0 && r.connectedHumanCount() == 1 {
+	if !existingPlayer && connectedHumansBeforeJoin == 0 && r.connectedHumanCount() == 1 && len(r.state.Players) == 1 {
 		r.resetForFreshSession(playerID)
 	}
 
@@ -206,16 +214,9 @@ func (r *Room) handleLeave(evt Event) bool {
 	}
 
 	if player.IsInHand() {
-		player.Status = StatusOut
-		player.ActedThisRound = true
-		player.LastAction = "out"
-		r.appendActionRecord(player, "out", 0, player.Bet)
-		if evt.PlayerID == r.state.CurrentPlayer {
-			r.afterAction()
-		} else if r.remainingInHand() <= 1 {
-			r.finishHandByFold()
+		if evt.PlayerID == r.state.CurrentPlayer && r.state.ActionRequestedAt.IsZero() {
+			r.state.ActionRequestedAt = now
 		}
-		return true
 	}
 	return false
 }
@@ -403,6 +404,7 @@ func (r *Room) sendActionRequest() {
 		}
 		conn, ok := r.conns[player.ID]
 		if !ok {
+			r.state.ActionRequestedAt = time.Now()
 			return
 		}
 		toCall := r.state.CurrentBet - player.Bet
@@ -645,6 +647,11 @@ func (r *Room) endHand() {
 			kept = append(kept, p)
 			continue
 		}
+		if !p.DisconnectedAt.IsZero() && p.Stack > 0 {
+			p.Status = StatusOut
+			kept = append(kept, p)
+			continue
+		}
 		delete(r.disconnected, p.ID)
 	}
 	r.state.Players = kept
@@ -657,7 +664,7 @@ func (r *Room) endHand() {
 	r.state.Phase = PhaseWaiting
 	r.effects.ClearHand()
 
-	if r.connectedHumanCount() == 0 {
+	if r.humanCount() == 0 && r.connectedHumanCount() == 0 {
 		r.resetToEmptyRoom()
 	}
 }
@@ -1163,6 +1170,33 @@ func minInt(a, b int) int {
 	return b
 }
 
+func (r *Room) addOneBot() bool {
+	if r.humanCount() == 0 {
+		return false
+	}
+	if len(r.state.Players) >= maxPlayers {
+		return false
+	}
+	seat := r.nextSeat()
+	if seat == -1 {
+		return false
+	}
+	aggro := 0.25 + r.rng.Float64()*0.6
+	skilliness := 0.2 + r.rng.Float64()*0.6
+	bot := &PlayerState{
+		ID:         "bot-" + uuid.NewString(),
+		Name:       fmt.Sprintf("Bot%d", seat+1),
+		Seat:       seat,
+		Stack:      initialStack,
+		Status:     StatusActive,
+		IsBot:      true,
+		Aggression: aggro,
+		Skilliness: skilliness,
+	}
+	r.state.Players = append(r.state.Players, bot)
+	return true
+}
+
 func (r *Room) ensureBots(target int) bool {
 	if target <= 0 {
 		return false
@@ -1316,6 +1350,9 @@ func (r *Room) pruneDisconnectedPlayers(now time.Time) bool {
 	}
 	if r.playerBySeat(r.state.DealerSeat) == nil {
 		r.state.DealerSeat = -1
+	}
+	if r.humanCount() == 0 && r.connectedHumanCount() == 0 {
+		r.resetToEmptyRoom()
 	}
 	return true
 }

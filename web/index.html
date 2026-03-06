@@ -8,125 +8,148 @@
   </head>
   <body>
     <main class="app">
-      <header class="page-header">
-        <h1>DirtyPlay</h1>
-        <p>千术德州扑克</p>
-      </header>
 
-      <section class="panel connect-panel">
-        <div class="connect-grid">
-          <label class="field">
-            <span>房间</span>
-            <input id="roomInput" type="text" value="room1" />
-          </label>
-          <label class="field">
-            <span>昵称</span>
-            <input id="nameInput" type="text" placeholder="输入你的昵称" />
-          </label>
-          <div class="join-col">
-            <button id="joinButton" type="button" class="join-btn">加入游戏</button>
+      <!-- ① 大厅屏 -->
+      <div id="lobbyScreen">
+        <header class="lobby-hero">
+          <h1 class="lobby-title">DirtyPlay</h1>
+          <p class="lobby-sub">千术德州扑克</p>
+        </header>
+
+        <div class="lobby-form">
+          <input id="lobbyNameInput" type="text" placeholder="输入你的昵称" class="lobby-name-input" />
+        </div>
+
+        <div class="lobby-actions">
+          <button id="createRoomBtn" class="lobby-big-btn">创建房间</button>
+          <div class="lobby-join-row">
+            <input id="roomCodeInput" type="text" placeholder="输入邀请码" maxlength="6" class="code-input" />
+            <button id="joinRoomBtn" class="lobby-big-btn secondary">加入</button>
           </div>
         </div>
-        <div class="connect-footer">
+
+        <p id="lobbyError" class="lobby-error" style="display:none"></p>
+      </div>
+
+      <!-- ② 游戏屏 -->
+      <div id="gameScreen" style="display:none">
+
+        <!-- 顶栏 -->
+        <div class="game-topbar">
+          <button id="backToLobbyBtn" class="ghost-btn">← 返回大厅</button>
+          <span id="roomCodeBadge" class="room-badge"></span>
           <span id="statusText" class="status-text" data-kind="ok">未连接</span>
-          <button id="resetIdentityButton" type="button" class="ghost-btn">切换新玩家</button>
-          <button id="connectButton" type="button" class="ghost-btn" style="display:none">连接</button>
         </div>
-      </section>
 
-      <section class="table-layout">
-        <section class="panel table-panel">
-          <h2>牌桌</h2>
-          <div class="table-meta">
-            <span id="phaseText" class="meta-pill">阶段: -</span>
-            <span id="turnText" class="meta-pill">当前行动: -</span>
-            <span id="potText" class="meta-pill">底池: 0</span>
-            <span id="mainPotText" class="meta-pill">主池: 0</span>
-            <span id="sidePotsText" class="meta-pill">边池: -</span>
-            <span id="heatText" class="meta-pill">怀疑值: 0</span>
+        <!-- 等待室（phase=waiting时显示） -->
+        <div id="waitingRoom" class="waiting-room" style="display:none">
+          <div class="waiting-invite">
+            <span class="waiting-label">邀请码</span>
+            <span id="waitingCode" class="waiting-code-text"></span>
+            <button id="copyCodeBtn" class="ghost-btn">复制</button>
           </div>
+          <p class="waiting-hint">分享邀请码邀请好友，或添加AI对手，凑够2人自动开局</p>
+          <button id="addBotBtn" class="add-bot-btn">＋ 添加AI对手</button>
+          <p id="waitingPlayerCount" class="waiting-count"></p>
+        </div>
 
-          <div class="table-surface">
-            <section class="zone community-zone" aria-label="公共牌区">
-              <h3>公共牌</h3>
-              <div id="communityCards" class="cards-row cards-community"></div>
-              <p id="communityText" class="zone-fallback">公共牌: -</p>
+        <!-- 牌桌 -->
+        <section class="table-layout">
+          <section class="panel table-panel">
+            <h2>牌桌</h2>
+            <div class="table-meta">
+              <span id="phaseText" class="meta-pill">阶段: -</span>
+              <span id="turnText" class="meta-pill">当前行动: -</span>
+              <span id="potText" class="meta-pill">底池: 0</span>
+              <span id="mainPotText" class="meta-pill">主池: 0</span>
+              <span id="sidePotsText" class="meta-pill">边池: -</span>
+              <span id="heatText" class="meta-pill">怀疑值: 0</span>
+            </div>
+
+            <div class="table-surface">
+              <section class="zone community-zone" aria-label="公共牌区">
+                <h3>公共牌</h3>
+                <div id="communityCards" class="cards-row cards-community"></div>
+                <p id="communityText" class="zone-fallback">公共牌: -</p>
+              </section>
+
+              <section class="seats-layer" id="seatsLayer" aria-label="玩家席位"></section>
+
+              <section class="zone hand-zone" aria-label="我的手牌区">
+                <h3>我的手牌</h3>
+                <div id="handCards" class="cards-row cards-hand"></div>
+                <p id="handText" class="zone-fallback">我的手牌: -</p>
+              </section>
+            </div>
+          </section>
+
+          <aside class="side-panels">
+            <section class="panel action-panel">
+              <h2>行动</h2>
+              <div class="action-stats">
+                <p id="toCallText">需跟注: 0</p>
+                <p id="minRaiseText">最小加注增量: 0</p>
+                <p id="raiseToText">最小加注到: 0</p>
+                <p id="maxRaiseText">加注上限: 0</p>
+                <p id="myStreetBetText">本轮已下注: 0</p>
+                <p id="myInvestedText">本局总投入: 0</p>
+              </div>
+
+              <div class="action-buttons">
+                <button id="foldButton" type="button" disabled>弃牌</button>
+                <button id="checkButton" type="button" disabled>过牌</button>
+                <button id="callButton" type="button" disabled>跟注</button>
+                <button id="allInButton" type="button" disabled>全下</button>
+              </div>
+
+              <div class="raise-row">
+                <label for="raiseInput">加注到</label>
+                <input id="raiseInput" type="number" min="0" value="0" />
+                <button id="raiseButton" type="button" disabled>加注</button>
+              </div>
             </section>
 
-            <section class="seats-layer" id="seatsLayer" aria-label="玩家席位"></section>
+            <section class="panel skill-panel">
+              <h2>技能</h2>
+              <p id="skillsText">技能: -</p>
+              <p id="selectedSkillText">已选技能: -</p>
+              <p id="skillDescriptionText" class="skill-description">技能说明: -</p>
+              <p id="skillHintText" class="skill-hint" data-kind="warn">可用性: -</p>
+              <div id="skillButtons" class="skill-buttons"></div>
 
-            <section class="zone hand-zone" aria-label="我的手牌区">
-              <h3>我的手牌</h3>
-              <div id="handCards" class="cards-row cards-hand"></div>
-              <p id="handText" class="zone-fallback">我的手牌: -</p>
+              <div class="skill-controls">
+                <select id="targetSelect" aria-label="技能目标">
+                  <option value="">目标玩家</option>
+                </select>
+                <select id="cardIdxSelect" aria-label="换牌索引">
+                  <option value="0">手牌 0</option>
+                  <option value="1">手牌 1</option>
+                </select>
+                <button id="useSkillButton" type="button" disabled>使用技能</button>
+              </div>
             </section>
-          </div>
+
+            <section class="panel status-panel">
+              <h2>状态</h2>
+              <p id="statusMirror" class="status-mirror">状态: 未连接</p>
+            </section>
+
+            <section class="panel log-panel">
+              <h2>最近行动</h2>
+              <ul id="actionLogList" class="action-log-list"></ul>
+            </section>
+          </aside>
         </section>
 
-        <aside class="side-panels">
-          <section class="panel action-panel">
-            <h2>行动</h2>
-            <div class="action-stats">
-              <p id="toCallText">需跟注: 0</p>
-              <p id="minRaiseText">最小加注增量: 0</p>
-              <p id="raiseToText">最小加注到: 0</p>
-              <p id="maxRaiseText">加注上限: 0</p>
-              <p id="myStreetBetText">本轮已下注: 0</p>
-              <p id="myInvestedText">本局总投入: 0</p>
-            </div>
+      </div>
 
-            <div class="action-buttons">
-              <button id="foldButton" type="button" disabled>弃牌</button>
-              <button id="checkButton" type="button" disabled>过牌</button>
-              <button id="callButton" type="button" disabled>跟注</button>
-              <button id="allInButton" type="button" disabled>全下</button>
-            </div>
-
-            <div class="raise-row">
-              <label for="raiseInput">加注到</label>
-              <input id="raiseInput" type="number" min="0" value="0" />
-              <button id="raiseButton" type="button" disabled>加注</button>
-            </div>
-          </section>
-
-          <section class="panel skill-panel">
-            <h2>技能</h2>
-            <p id="skillsText">技能: -</p>
-            <p id="selectedSkillText">已选技能: -</p>
-            <p id="skillDescriptionText" class="skill-description">技能说明: -</p>
-            <p id="skillHintText" class="skill-hint" data-kind="warn">可用性: -</p>
-            <div id="skillButtons" class="skill-buttons"></div>
-
-            <div class="skill-controls">
-              <select id="targetSelect" aria-label="技能目标">
-                <option value="">目标玩家</option>
-              </select>
-              <select id="cardIdxSelect" aria-label="换牌索引">
-                <option value="0">手牌 0</option>
-                <option value="1">手牌 1</option>
-              </select>
-              <button id="useSkillButton" type="button" disabled>使用技能</button>
-            </div>
-          </section>
-
-          <section class="panel status-panel">
-            <h2>状态</h2>
-            <p id="statusMirror" class="status-mirror">状态: 未连接</p>
-          </section>
-
-          <section class="panel log-panel">
-            <h2>最近行动</h2>
-            <ul id="actionLogList" class="action-log-list"></ul>
-          </section>
-        </aside>
-      </section>
-
-      <ul id="playersList" class="sr-only" aria-hidden="true"></ul>
     </main>
 
     <div class="orientation-tip" aria-live="polite">
       建议切换到横屏以获得更好的牌桌体验
     </div>
+
+    <ul id="playersList" class="sr-only" aria-hidden="true"></ul>
 
     <script src="./app.js"></script>
   </body>
