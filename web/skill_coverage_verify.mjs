@@ -70,7 +70,12 @@ async function waitForJoined(page) {
   await page.waitForFunction(() => {
     try {
       const state = JSON.parse(window.render_game_to_text());
-      return Array.isArray(state.seats) && state.seats.length >= 4;
+      return Array.isArray(state.seats)
+        && state.seats.length >= 4
+        && state.phase
+        && state.phase !== "waiting"
+        && Array.isArray(state.my_skills)
+        && state.my_skills.length > 0;
     } catch (_err) {
       return false;
     }
@@ -132,11 +137,15 @@ async function openAndJoin(page, attempt, _roomId) {
     const gs = document.getElementById("gameScreen");
     return gs && gs.style.display !== "none";
   }, { timeout: 15000 });
-  // Add 3 bots so the game can start (need ≥2 players)
-  for (let i = 0; i < 3; i++) {
-    await page.click("#addBotBtn");
-    await page.waitForTimeout(200);
-  }
+  // Send multiple add_bot requests in one turn to avoid racing the auto-start at 2 players.
+  await page.waitForSelector("#addBotBtn", { state: "visible", timeout: 10000 });
+  await page.evaluate(() => {
+    const button = document.querySelector("#addBotBtn");
+    for (let i = 0; i < 3; i += 1) {
+      button?.click();
+    }
+  });
+  await page.waitForTimeout(300);
   await waitForJoined(page);
 }
 

@@ -443,6 +443,7 @@ func validActions(p *PlayerState, toCall int, minRaise int) []string {
 }
 
 func (r *Room) afterAction() {
+	r.state.ActionRequestedAt = time.Time{}
 	if r.remainingInHand() <= 1 {
 		r.finishHandByFold()
 		return
@@ -460,6 +461,7 @@ func (r *Room) afterAction() {
 
 func (r *Room) advancePhase() {
 	r.effects.ClearStreet(string(r.state.Phase))
+	r.state.ActionRequestedAt = time.Time{}
 	switch r.state.Phase {
 	case PhasePreFlop:
 		r.dealCommunity(3)
@@ -556,6 +558,8 @@ func (r *Room) finishHandByFold() {
 
 func (r *Room) showdown() {
 	r.state.Phase = PhaseShowdown
+	r.state.CurrentPlayer = ""
+	r.state.ActionRequestedAt = time.Time{}
 	r.effects.ClearHand()
 	r.state.Pots = CalculatePots(r.state.Players)
 	if len(r.state.Pots) == 0 {
@@ -661,6 +665,7 @@ func (r *Room) endHand() {
 	r.state.CurrentBet = 0
 	r.state.MinRaise = r.state.BigBlind
 	r.state.CurrentPlayer = ""
+	r.state.ActionRequestedAt = time.Time{}
 	r.state.Phase = PhaseWaiting
 	r.effects.ClearHand()
 
@@ -682,6 +687,7 @@ func (r *Room) startHand() {
 	r.state.Community = nil
 	r.state.Pots = nil
 	r.state.RecentActions = nil
+	r.state.ActionRequestedAt = time.Time{}
 	r.effects.ClearHand()
 
 	r.state.Deck = poker.NewDeck()
@@ -1384,37 +1390,55 @@ func (r *Room) botAct(player *PlayerState) bool {
 }
 
 func (r *Room) chooseBotAction(player *PlayerState) protocol.ActionMsg {
-	toCall := r.state.CurrentBet - player.Bet
-	canRaise := player.Stack > toCall && player.Stack >= toCall+r.state.MinRaise
-	maxRaise := player.Bet + player.Stack
-	if toCall <= 0 {
-		if canRaise && r.rng.Float64() < 0.22 {
-			amount := r.state.CurrentBet + r.state.MinRaise
-			if amount > maxRaise {
-				amount = maxRaise
+	ctx := r.botContext(player)
+	multiwayPenalty := 0.05 * float64(maxInt(0, ctx.opponents-1))
+	strength := clampFloat(ctx.handStrength+ctx.position*0.08+ctx.aggression*0.06-multiwayPenalty, 0.05, 0.99)
+	semibluff := ctx.drawStrength >= 0.16 || ctx.bluffActive
+	callThreshold := clampFloat(0.26+ctx.pressure*0.95+multiwayPenalty-ctx.position*0.08-ctx.aggression*0.05, 0.16, 0.9)
+	raiseThreshold := clampFloat(callThreshold+0.18-ctx.aggression*0.08, 0.35, 0.95)
+
+	if ctx.toCall <= 0 {
+		if ctx.canRaise && strength >= 0.82 {
+			return r.botRaiseAction(player, ctx, 1.1)
+		}
+		if ctx.canRaise && strength >= 0.64 && (ctx.position >= 0.45 || ctx.aggression >= 0.55) {
+			if r.rng.Float64() < 0.55+ctx.aggression*0.15 {
+				return r.botRaiseAction(player, ctx, 0.9)
 			}
-			return protocol.ActionMsg{Action: "raise", Amount: amount}
+		}
+		if ctx.canRaise && semibluff && ctx.pendingOpponents > 0 && strength >= 0.4 {
+			if r.rng.Float64() < 0.22+ctx.skilliness*0.18 {
+				return r.botRaiseAction(player, ctx, 0.75)
+			}
 		}
 		return protocol.ActionMsg{Action: "check"}
 	}
 
-	if toCall >= player.Stack {
-		return protocol.ActionMsg{Action: "all_in"}
+	if ctx.toCall >= player.Stack {
+		jamThreshold := clampFloat(0.72+ctx.pressure*0.5+multiwayPenalty-ctx.aggression*0.1, 0.6, 0.94)
+		if strength >= jamThreshold || (ctx.handStrength >= 0.58 && ctx.drawStrength >= 0.16 && ctx.pressure <= 0.35) {
+			return protocol.ActionMsg{Action: "all_in"}
+		}
+		return protocol.ActionMsg{Action: "fold"}
 	}
 
-	callLimit := maxInt(r.state.BigBlind*3, player.Stack/6)
-	if toCall <= callLimit {
-		if canRaise && r.rng.Float64() < 0.15 {
-			amount := r.state.CurrentBet + r.state.MinRaise
-			if amount > maxRaise {
-				amount = maxRaise
-			}
-			return protocol.ActionMsg{Action: "raise", Amount: amount}
+	if ctx.canRaise && strength >= raiseThreshold {
+		if strength >= 0.92 && player.Stack <= maxInt(ctx.totalPot, r.state.BigBlind*12) {
+			return protocol.ActionMsg{Action: "all_in"}
 		}
+		return r.botRaiseAction(player, ctx, 1.0)
+	}
+
+	if ctx.canRaise && semibluff && ctx.pendingOpponents > 0 && ctx.pressure <= 0.18 && strength >= callThreshold-0.08 {
+		if r.rng.Float64() < 0.18+ctx.aggression*0.2+ctx.skilliness*0.18 {
+			return r.botRaiseAction(player, ctx, 0.75)
+		}
+	}
+
+	if strength >= callThreshold || (ctx.drawStrength >= 0.16 && ctx.pressure <= 0.28) {
 		return protocol.ActionMsg{Action: "call"}
 	}
-
-	if r.rng.Float64() < 0.08 {
+	if ctx.toCall <= r.state.BigBlind && strength >= callThreshold-0.1 {
 		return protocol.ActionMsg{Action: "call"}
 	}
 	return protocol.ActionMsg{Action: "fold"}
@@ -1433,7 +1457,7 @@ func (r *Room) fallbackBotAction(player *PlayerState) protocol.ActionMsg {
 		return protocol.ActionMsg{Action: "check"}
 	}
 	if toCall >= player.Stack {
-		return protocol.ActionMsg{Action: "all_in"}
+		return protocol.ActionMsg{Action: "fold"}
 	}
 	return protocol.ActionMsg{Action: "call"}
 }
@@ -1445,53 +1469,34 @@ func (r *Room) botMaybeUseSkill(player *PlayerState) {
 	if len(player.Skills) == 0 {
 		return
 	}
+	msg, score, ok := r.chooseBotSkill(player)
+	if !ok || score < 0.4 {
+		return
+	}
 	skilliness := player.Skilliness
 	if skilliness <= 0 {
 		skilliness = 0.3
 	}
-	if r.rng.Float64() > 0.15+0.35*skilliness {
+	heatRatio := float64(player.Heat) / float64(skill.LockoutThreshold)
+	triggerChance := clampFloat(0.08+0.52*skilliness+0.35*score-0.28*heatRatio, 0.12, 0.85)
+	if r.rng.Float64() > triggerChance {
 		return
 	}
-	candidates := make([]skill.Card, 0, len(player.Skills))
-	for _, s := range player.Skills {
-		if s.ID == "counter" {
-			continue
-		}
-		candidates = append(candidates, s)
-	}
-	if len(candidates) == 0 {
-		return
-	}
-	for i := 0; i < len(candidates); i++ {
-		card := candidates[r.rng.Intn(len(candidates))]
-		msg, ok := r.botSkillMsg(card, player)
-		if !ok {
-			continue
-		}
-		_ = r.handleSkill(Event{
-			Type:     "skill",
-			PlayerID: player.ID,
-			Conn:     botConn{id: player.ID},
-			Data:     msg,
-		})
-		return
-	}
+	_ = r.handleSkill(Event{
+		Type:     "skill",
+		PlayerID: player.ID,
+		Conn:     botConn{id: player.ID},
+		Data:     msg,
+	})
 }
 
 func (r *Room) botSkillMsg(card skill.Card, player *PlayerState) (protocol.SkillMsg, bool) {
 	switch card.ID {
 	case "peek":
-		var targets []string
-		for _, p := range r.state.Players {
-			if p.ID == player.ID || !p.IsInHand() {
-				continue
-			}
-			targets = append(targets, p.ID)
-		}
-		if len(targets) == 0 {
+		target := r.botPeekTarget(player)
+		if target == "" {
 			return protocol.SkillMsg{}, false
 		}
-		target := targets[r.rng.Intn(len(targets))]
 		return protocol.SkillMsg{SkillID: card.ID, TargetID: target}, true
 	case "mist":
 		if len(r.state.Community) == 0 {
@@ -1502,7 +1507,7 @@ func (r *Room) botSkillMsg(card skill.Card, player *PlayerState) (protocol.Skill
 		if len(player.Hand) == 0 || len(r.state.Deck) == 0 {
 			return protocol.SkillMsg{}, false
 		}
-		cardIdx := r.rng.Intn(len(player.Hand))
+		cardIdx := r.botSwapIndex(player)
 		return protocol.SkillMsg{SkillID: card.ID, CardIdx: cardIdx}, true
 	case "bluff":
 		return protocol.SkillMsg{SkillID: card.ID}, true

@@ -240,7 +240,7 @@ async function testCreateRoomAndStart(browser) {
   try {
     const code = await createRoom(page, "HostFlow");
     let snap = await getSnapshot(page);
-    record("建房成功", snap.statusText.includes("已创建房间"), snap.statusText);
+    record("建房成功", snap.statusText.includes("已创建房间") || snap.statusText.includes("已进入房间，等待开局"), snap.statusText);
     record("邀请码显示", code.length === 6 && snap.waitingCode === code, `badge=${snap.roomCodeBadge}, waiting=${snap.waitingCode}`);
 
     await addBots(page, 1);

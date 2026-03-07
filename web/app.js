@@ -313,6 +313,8 @@ async function joinRoom() {
 
 function showLobby() {
   appState.screen = "lobby";
+  appState.lastState = normalizeState({});
+  appState.actionReq = normalizeActionReq({});
   refs.lobbyScreen.style.display = "";
   refs.gameScreen.style.display = "none";
   showLobbyError("");
@@ -322,6 +324,7 @@ function showGame(roomId, code) {
   appState.screen = "game";
   appState.currentRoomId = roomId;
   appState.currentRoomCode = code;
+  appState.actionReq = normalizeActionReq({});
   refs.lobbyScreen.style.display = "none";
   refs.gameScreen.style.display = "";
   refs.roomCodeBadge.textContent = code || "";
@@ -538,6 +541,7 @@ function renderState(rawState) {
   const previousState = appState.lastState;
   const state = normalizeState(rawState);
   appState.lastState = state;
+  syncActionReqWithState(state);
   const pots = ensureArray(state.pots).length > 0 ? state.pots : calculatePotsFromPlayers(state.players);
   syncStatusWithState(state);
 
@@ -562,6 +566,17 @@ function renderState(rawState) {
   updateActionArea();
   updateSkillControls();
   updateWaitingRoom(state);
+}
+
+function syncActionReqWithState(state) {
+  const currentPlayer = String(state?.current_player || "");
+  if (!isActionPhase(state?.phase) || !currentPlayer) {
+    appState.actionReq = normalizeActionReq({});
+    return;
+  }
+  if (appState.actionReq.player_id && appState.actionReq.player_id !== currentPlayer) {
+    appState.actionReq = normalizeActionReq({});
+  }
 }
 
 function renderPotBreakdown(pots, totalPot) {
@@ -857,6 +872,9 @@ function updateActionArea() {
   const myStreetBet = Number(me?.bet || 0);
   const myInvested = Number(me?.total_bet || 0);
   const minRaiseTo = myStreetBet + toCall + minRaise;
+  const isMyTurn = Boolean(appState.lastState.current_player && appState.lastState.current_player === appState.playerId);
+  const ownsActionReq = Boolean(appState.actionReq.player_id && appState.actionReq.player_id === appState.playerId);
+  const canActNow = isActionPhase(appState.lastState.phase) && isMyTurn && ownsActionReq;
 
   refs.toCallText.textContent = `需跟注: ${toCall}`;
   refs.minRaiseText.textContent = `最小加注增量: ${minRaise}`;
@@ -865,17 +883,15 @@ function updateActionArea() {
   refs.myStreetBetText.textContent = `本轮已下注: ${myStreetBet}`;
   refs.myInvestedText.textContent = `本局总投入: ${myInvested}`;
 
-  if (validActions.includes("raise")) {
+  if (canActNow && validActions.includes("raise")) {
     refs.raiseInput.value = String(minRaiseTo);
   }
 
-  const isMyTurn = Boolean(appState.lastState.current_player && appState.lastState.current_player === appState.playerId);
-
-  refs.foldButton.disabled = !(isMyTurn && validActions.includes("fold"));
-  refs.checkButton.disabled = !(isMyTurn && validActions.includes("check"));
-  refs.callButton.disabled = !(isMyTurn && validActions.includes("call"));
-  refs.raiseButton.disabled = !(isMyTurn && validActions.includes("raise"));
-  refs.allInButton.disabled = !(isMyTurn && validActions.includes("all_in"));
+  refs.foldButton.disabled = !(canActNow && validActions.includes("fold"));
+  refs.checkButton.disabled = !(canActNow && validActions.includes("check"));
+  refs.callButton.disabled = !(canActNow && validActions.includes("call"));
+  refs.raiseButton.disabled = !(canActNow && validActions.includes("raise"));
+  refs.allInButton.disabled = !(canActNow && validActions.includes("all_in"));
 }
 
 function updateSkillControls() {
@@ -1017,7 +1033,11 @@ function setStatus(text, isError) {
 }
 
 function syncStatusWithState(state) {
-  if (!shouldAutoSyncStatus(appState.connectionStatus)) {
+  const currentStatus = String(appState.connectionStatus || "");
+  if (currentStatus === "已创建房间，等待玩家加入" && state.phase === "waiting") {
+    return;
+  }
+  if (!shouldAutoSyncStatus(currentStatus)) {
     return;
   }
   if (state.phase === "waiting") {
@@ -1033,7 +1053,9 @@ function shouldAutoSyncStatus(text) {
     || value === "已加入房间"
     || value === "已进入房间，等待开局"
     || value.startsWith("牌局进行中：")
-    || value.startsWith("已加入，玩家ID ");
+    || value.startsWith("已加入，玩家ID ")
+    || value.startsWith("请求失败:")
+    || value.startsWith("服务器错误:");
 }
 
 function clearIdentity() {
