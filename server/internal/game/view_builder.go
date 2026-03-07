@@ -50,10 +50,7 @@ func BuildGameState(state *GameState, effects *skill.Effects, viewer *PlayerStat
 	}
 
 	sort.Slice(players, func(i, j int) bool { return players[i].Seat < players[j].Seat })
-	pots := state.Pots
-	if len(pots) == 0 {
-		pots = CalculatePots(state.Players)
-	}
+	pots := displayPots(state)
 
 	return protocol.GameStateMsg{
 		Phase:          string(state.Phase),
@@ -83,6 +80,40 @@ func totalPot(state *GameState) int {
 		total += p.TotalBet
 	}
 	return total
+}
+
+func displayPots(state *GameState) []Pot {
+	if len(state.Pots) > 0 {
+		return state.Pots
+	}
+	if hasAllInCommitted(state.Players) {
+		return CalculatePots(state.Players)
+	}
+
+	total := 0
+	var eligible []string
+	for _, p := range state.Players {
+		total += p.TotalBet
+		if p.TotalBet > 0 && p.Status != StatusFolded && p.Status != StatusOut {
+			eligible = append(eligible, p.ID)
+		}
+	}
+	if total <= 0 {
+		return nil
+	}
+	return []Pot{{
+		Amount:   total,
+		Eligible: eligible,
+	}}
+}
+
+func hasAllInCommitted(players []*PlayerState) bool {
+	for _, p := range players {
+		if p.Status == StatusAllIn && p.TotalBet > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func cardStrings(cards []poker.Card) []string {

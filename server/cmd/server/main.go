@@ -22,7 +22,10 @@ func main() {
 	webDir := resolveWebDir()
 	mux.Handle("/", http.FileServer(http.Dir(webDir)))
 
-	addr := ":8080"
+	addr := os.Getenv("DIRTYPLAY_ADDR")
+	if addr == "" {
+		addr = ":8080"
+	}
 	log.Printf("web root: %s", webDir)
 	log.Printf("server listening on %s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {

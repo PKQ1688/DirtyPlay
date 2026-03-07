@@ -159,10 +159,22 @@ func (rm *RoomManager) HandleMessage(conn Conn, msgType string, seq int64, paylo
 			_ = conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: err.Error()})
 			return
 		}
-		_ = session
 		room.eventCh <- Event{
-			Type: "add_bot",
-			Conn: conn,
+			Type:     "add_bot",
+			PlayerID: session.PlayerID,
+			Conn:     conn,
+		}
+
+	case "start_game":
+		session, room, err := rm.sessionRoom(conn.ID())
+		if err != nil {
+			_ = conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: err.Error()})
+			return
+		}
+		room.eventCh <- Event{
+			Type:     "start_game",
+			PlayerID: session.PlayerID,
+			Conn:     conn,
 		}
 
 	case "join":

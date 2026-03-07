@@ -63,6 +63,8 @@ const SERVER_ERROR_MAP = {
   "not in action phase": "当前不在行动阶段，暂时不能使用技能。",
   "not your turn": "还没轮到你行动。",
   "invalid player": "玩家状态异常，无法执行本次操作。",
+  "not enough players": "至少需要 2 名玩家才能开始游戏。",
+  "game already started": "牌局已经开始，不能再执行等待室操作。",
   "skill already used": "本回合你已经使用过一次技能。",
   "heat locked": "怀疑值过高，技能已被锁定。",
   "skill not owned": "你当前并不持有该技能。",
@@ -72,6 +74,7 @@ const SERVER_ERROR_MAP = {
   "invalid card index": "换牌索引无效，请重新选择。",
   "deck empty": "牌堆已空，当前不能换牌。",
   "unknown skill": "技能类型无效。",
+  "room full": "房间已满，无法继续加入或添加 AI。",
 };
 
 const SUIT_META = {
@@ -119,6 +122,7 @@ const refs = {
   waitingCode: document.getElementById("waitingCode"),
   copyCodeBtn: document.getElementById("copyCodeBtn"),
   addBotBtn: document.getElementById("addBotBtn"),
+  startGameBtn: document.getElementById("startGameBtn"),
   waitingPlayerCount: document.getElementById("waitingPlayerCount"),
   statusText: document.getElementById("statusText"),
   statusMirror: document.getElementById("statusMirror"),
@@ -174,6 +178,7 @@ const appState = {
   currentRoomCode: "",
   currentRoomId: "",
   _pendingJoinCode: "",
+  actionPending: false,
 };
 
 const uiTimers = [];
@@ -197,6 +202,7 @@ updateSkillControls();
 refs.createRoomBtn.addEventListener("click", () => { void createRoom(); });
 refs.joinRoomBtn.addEventListener("click", () => { void joinByCode(); });
 refs.addBotBtn.addEventListener("click", addBot);
+refs.startGameBtn.addEventListener("click", startGame);
 refs.backToLobbyBtn.addEventListener("click", () => { void disconnectSocket(); showLobby(); });
 refs.copyCodeBtn.addEventListener("click", () => {
   navigator.clipboard.writeText(appState.currentRoomCode).catch(() => {});
@@ -248,10 +254,14 @@ async function connectToServer(forceReconnect = false) {
   appState.ws = ws;
 
   ws.addEventListener("close", () => {
+    appState.actionPending = false;
+    updateActionArea();
     setStatus("连接已断开", true);
   });
 
   ws.addEventListener("error", () => {
+    appState.actionPending = false;
+    updateActionArea();
     setStatus("网络连接错误", true);
   });
 
@@ -315,20 +325,23 @@ function showLobby() {
   appState.screen = "lobby";
   appState.lastState = normalizeState({});
   appState.actionReq = normalizeActionReq({});
+  appState.actionPending = false;
   refs.lobbyScreen.style.display = "";
   refs.gameScreen.style.display = "none";
   showLobbyError("");
+  updateActionArea();
 }
 
 function showGame(roomId, code) {
   appState.screen = "game";
   appState.currentRoomId = roomId;
   appState.currentRoomCode = code;
-  appState.actionReq = normalizeActionReq({});
+  appState.actionPending = false;
   refs.lobbyScreen.style.display = "none";
   refs.gameScreen.style.display = "";
   refs.roomCodeBadge.textContent = code || "";
   refs.waitingCode.textContent = code || "";
+  updateActionArea();
 }
 
 function showLobbyError(msg) {
@@ -341,7 +354,7 @@ async function ensureConnected() {
 }
 
 async function createRoom() {
-  const name = refs.lobbyNameInput.value.trim() || "玩家";
+  const name = refs.lobbyNameInput.value.trim();
   showLobbyError("");
   const connected = await ensureConnected();
   if (!connected) {
@@ -352,7 +365,7 @@ async function createRoom() {
     appState.playerName = name;
     localStorage.setItem(PLAYER_NAME_KEY, name);
   }
-  sendMessage("create_room", { name });
+  sendMessage("create_room", name ? { name } : {});
 }
 
 async function joinByCode() {
@@ -361,7 +374,7 @@ async function joinByCode() {
     showLobbyError("请输入6位邀请码");
     return;
   }
-  const name = refs.lobbyNameInput.value.trim() || "玩家";
+  const name = refs.lobbyNameInput.value.trim();
   showLobbyError("");
   const connected = await ensureConnected();
   if (!connected) {
@@ -374,29 +387,41 @@ async function joinByCode() {
   }
   // Store code so ack handler can display it
   appState._pendingJoinCode = code;
-  sendMessage("join_room", {
+  const payload = {
     code,
-    name,
     player_id: appState.playerId || "",
-  });
+  };
+  if (name) {
+    payload.name = name;
+  }
+  sendMessage("join_room", payload);
 }
 
 function addBot() {
   sendMessage("add_bot", {});
 }
 
+function startGame() {
+  sendMessage("start_game", {});
+}
+
 function updateWaitingRoom(state) {
   const isWaiting = state.phase === "waiting";
+  const total = ensureArray(state.players).length || 0;
   refs.waitingRoom.style.display = isWaiting ? "" : "none";
   if (isWaiting) {
-    const total = ensureArray(state.players).length || 0;
-    refs.waitingPlayerCount.textContent = `当前 ${total} 人 / 最多 6 人，满2人自动开局`;
+    refs.waitingPlayerCount.textContent = `当前 ${total} 人 / 最多 6 人`;
   }
+  refs.addBotBtn.disabled = !isWaiting || total >= 6;
+  refs.startGameBtn.disabled = !isWaiting || total < 2;
 }
 
 function sendAction(action, amount = 0) {
   if (!isConnected()) {
     setStatus("尚未连接服务器", true);
+    return;
+  }
+  if (appState.actionPending) {
     return;
   }
 
@@ -405,6 +430,8 @@ function sendAction(action, amount = 0) {
     payload.amount = amount;
   }
 
+  appState.actionPending = true;
+  updateActionArea();
   sendMessage("action", payload);
 }
 
@@ -472,6 +499,10 @@ function onMessage(raw) {
     case "ack":
       if (payload.success === false) {
         const mappedError = friendlyServerError(payload.error || "");
+        if (appState.lastSentType === "action") {
+          appState.actionPending = false;
+          updateActionArea();
+        }
         if (appState.screen === "lobby") {
           showLobbyError(mappedError);
         } else {
@@ -506,10 +537,12 @@ function onMessage(raw) {
       break;
 
     case "state":
+      appState.actionPending = false;
       renderState(payload);
       break;
 
     case "action_req":
+      appState.actionPending = false;
       appState.actionReq = normalizeActionReq(payload || {});
       updateActionArea();
       updateSkillControls();
@@ -874,7 +907,7 @@ function updateActionArea() {
   const minRaiseTo = myStreetBet + toCall + minRaise;
   const isMyTurn = Boolean(appState.lastState.current_player && appState.lastState.current_player === appState.playerId);
   const ownsActionReq = Boolean(appState.actionReq.player_id && appState.actionReq.player_id === appState.playerId);
-  const canActNow = isActionPhase(appState.lastState.phase) && isMyTurn && ownsActionReq;
+  const canActNow = isActionPhase(appState.lastState.phase) && isMyTurn && ownsActionReq && !appState.actionPending;
 
   refs.toCallText.textContent = `需跟注: ${toCall}`;
   refs.minRaiseText.textContent = `最小加注增量: ${minRaise}`;
@@ -1083,6 +1116,7 @@ async function switchToNewIdentity() {
 function normalizeState(rawState) {
   return {
     phase: String(rawState?.phase || ""),
+    dealer_seat: Number(rawState?.dealer_seat ?? -1),
     hand_seq: Number(rawState?.hand_seq || 0),
     total_pot: Number(rawState?.total_pot || 0),
     pots: ensureArray(rawState?.pots).map((pot) => ({
@@ -1529,6 +1563,20 @@ function formatActionLogEntry(entry) {
 }
 
 function calculatePotsFromPlayers(players) {
+  const safePlayers = ensureArray(players);
+  const hasAllIn = safePlayers.some((player) => normalizeStatus(player?.status || "") === "all_in" && Number(player?.total_bet || 0) > 0);
+  if (!hasAllIn) {
+    const total = safePlayers.reduce((sum, player) => sum + Number(player?.total_bet || 0), 0);
+    if (total <= 0) {
+      return [];
+    }
+    const eligibleCount = safePlayers.filter((player) => {
+      const status = normalizeStatus(player?.status || "");
+      return Number(player?.total_bet || 0) > 0 && status !== "folded" && status !== "out";
+    }).length;
+    return [{ kind: "main", amount: total, eligible_count: eligibleCount }];
+  }
+
   const contributions = ensureArray(players)
     .map((player) => {
       const status = normalizeStatus(player?.status || "");
@@ -1675,6 +1723,8 @@ function renderGameToText() {
     connection_status: appState.connectionStatus,
     phase: appState.lastState.phase || "",
     current_player: appState.lastState.current_player || "",
+    dealer_seat: Number(appState.lastState.dealer_seat || 0),
+    player_count: players.length,
     hand_seq: Number(appState.lastState.hand_seq || 0),
     total_pot: Number(appState.lastState.total_pot || 0),
     pots: pots.map((pot) => ({
@@ -1722,6 +1772,8 @@ function renderGameToText() {
       raise_enabled: !refs.raiseButton.disabled,
       all_in_enabled: !refs.allInButton.disabled,
       use_skill_enabled: !refs.useSkillButton.disabled,
+      add_bot_enabled: !refs.addBotBtn.disabled,
+      start_game_enabled: !refs.startGameBtn.disabled,
     },
   };
 

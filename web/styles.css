@@ -277,9 +277,16 @@ body {
 
 .add-bot-btn {
   width: fit-content;
-  margin: 0 auto;
   padding: 10px 28px;
   font-size: 15px;
+}
+
+.waiting-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .waiting-count {

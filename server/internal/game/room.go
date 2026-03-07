@@ -90,7 +90,7 @@ func (r *Room) EventLoop() {
 				r.sendActionRequest()
 			}
 			if r.state.Phase == PhaseWaiting {
-				if r.humanCount() > 0 && r.state.ActiveCount() >= 2 {
+				if r.shouldAutoStartWaitingHand() {
 					r.tryStartHand()
 					r.broadcastViews()
 					r.sendActionRequest()
@@ -111,7 +111,9 @@ func (r *Room) handleEvent(evt Event) bool {
 	case "skill":
 		return r.handleSkill(evt)
 	case "add_bot":
-		return r.addOneBot()
+		return r.handleAddBot(evt)
+	case "start_game":
+		return r.handleStartGame(evt)
 	default:
 		return false
 	}
@@ -364,6 +366,42 @@ func (r *Room) handleSkill(evt Event) bool {
 		Result:   result,
 		Blocked:  blocked,
 	})
+	_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: true})
+	return true
+}
+
+func (r *Room) handleAddBot(evt Event) bool {
+	if r.state.Phase != PhaseWaiting {
+		_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: "game already started"})
+		return false
+	}
+	if !r.addOneBot() {
+		_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: "room full"})
+		return false
+	}
+	_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: true})
+	return true
+}
+
+func (r *Room) handleStartGame(evt Event) bool {
+	if r.state.Phase != PhaseWaiting {
+		_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: "game already started"})
+		return false
+	}
+	player := r.state.PlayerByID(evt.PlayerID)
+	if player == nil || player.IsBot {
+		_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: "invalid player"})
+		return false
+	}
+	if r.state.ActiveCount() < minPlayersToStart {
+		_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: "not enough players"})
+		return false
+	}
+	r.tryStartHand()
+	if r.state.Phase == PhaseWaiting {
+		_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: "not enough players"})
+		return false
+	}
 	_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: true})
 	return true
 }
@@ -681,6 +719,16 @@ func (r *Room) tryStartHand() {
 	r.startHand()
 }
 
+func (r *Room) shouldAutoStartWaitingHand() bool {
+	if r.state.Phase != PhaseWaiting {
+		return false
+	}
+	if r.state.ActiveCount() < minPlayersToStart {
+		return false
+	}
+	return r.connectedHumanCount() >= minPlayersToStart
+}
+
 func (r *Room) startHand() {
 	r.state.HandSeq++
 	r.state.Phase = PhaseDealing
@@ -910,7 +958,7 @@ func (r *Room) checkTimeouts() bool {
 	currentFolded := false
 	now := time.Now()
 	for id, since := range r.disconnected {
-		if now.Sub(since) < actionTimeout {
+		if now.Sub(since) < evictTimeout {
 			continue
 		}
 		player := r.state.PlayerByID(id)

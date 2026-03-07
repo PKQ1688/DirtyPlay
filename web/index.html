@@ -48,8 +48,11 @@
             <span id="waitingCode" class="waiting-code-text"></span>
             <button id="copyCodeBtn" class="ghost-btn">复制</button>
           </div>
-          <p class="waiting-hint">分享邀请码邀请好友，或添加AI对手，凑够2人自动开局</p>
-          <button id="addBotBtn" class="add-bot-btn">＋ 添加AI对手</button>
+          <p class="waiting-hint">分享邀请码邀请好友，满2人自动开局；若添加 AI 对手，请手动点击开始游戏。</p>
+          <div class="waiting-actions">
+            <button id="addBotBtn" class="add-bot-btn">＋ 添加AI对手</button>
+            <button id="startGameBtn" class="lobby-big-btn" type="button" disabled>开始游戏</button>
+          </div>
           <p id="waitingPlayerCount" class="waiting-count"></p>
         </div>
 

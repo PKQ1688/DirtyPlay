@@ -42,3 +42,6 @@ type JoinByCodeMsg struct {
 
 // AddBotMsg is sent C→S to add one AI opponent to the current room.
 type AddBotMsg struct{}
+
+// StartGameMsg is sent C→S to manually start a waiting room that already has enough players.
+type StartGameMsg struct{}
