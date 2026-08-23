@@ -89,6 +89,13 @@ func (rm *RoomManager) HandleMessage(conn Conn, msgType string, seq int64, paylo
 				Code:     code,
 				PlayerID: res.PlayerID,
 			})
+			if msg.QuickStart {
+				room.eventCh <- Event{
+					Type:     "quick_start",
+					PlayerID: res.PlayerID,
+					Conn:     conn,
+				}
+			}
 		case <-time.After(2 * time.Second):
 			_ = conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: "create_room timeout"})
 		}
@@ -173,6 +180,18 @@ func (rm *RoomManager) HandleMessage(conn Conn, msgType string, seq int64, paylo
 		}
 		room.eventCh <- Event{
 			Type:     "start_game",
+			PlayerID: session.PlayerID,
+			Conn:     conn,
+		}
+
+	case "quick_start":
+		session, room, err := rm.sessionRoom(conn.ID())
+		if err != nil {
+			_ = conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: err.Error()})
+			return
+		}
+		room.eventCh <- Event{
+			Type:     "quick_start",
 			PlayerID: session.PlayerID,
 			Conn:     conn,
 		}

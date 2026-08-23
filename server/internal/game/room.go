@@ -3,6 +3,7 @@ package game
 import (
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"sort"
 	"strconv"
@@ -114,6 +115,8 @@ func (r *Room) handleEvent(evt Event) bool {
 		return r.handleAddBot(evt)
 	case "start_game":
 		return r.handleStartGame(evt)
+	case "quick_start":
+		return r.handleQuickStart(evt)
 	default:
 		return false
 	}
@@ -406,6 +409,33 @@ func (r *Room) handleStartGame(evt Event) bool {
 	return true
 }
 
+func (r *Room) handleQuickStart(evt Event) bool {
+	if r.state.Phase != PhaseWaiting {
+		_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: "game already started"})
+		return false
+	}
+	player := r.state.PlayerByID(evt.PlayerID)
+	if player == nil || player.IsBot {
+		_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: "invalid player"})
+		return false
+	}
+	r.removeBustedBots()
+	if player.Stack <= 0 {
+		player.Stack = initialStack
+		player.Status = StatusActive
+		player.Heat = 0
+		player.Skills = nil
+	}
+	r.ensureBots(targetPlayers)
+	r.tryStartHand()
+	if r.state.Phase == PhaseWaiting {
+		_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: "not enough players"})
+		return false
+	}
+	_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: true})
+	return true
+}
+
 func (r *Room) reply(evt Event, playerID string, err error) {
 	if evt.Reply == nil {
 		return
@@ -449,6 +479,11 @@ func (r *Room) sendActionRequest() {
 		minRaise := r.state.MinRaise
 		valid := validActions(player, toCall, minRaise)
 		canUseSkill := player.Heat < skill.LockoutThreshold && len(player.Skills) > 0 && !player.SkillUsedThisTurn
+		timeoutSec := int(actionTimeout.Seconds())
+		if !r.state.ActionRequestedAt.IsZero() {
+			remaining := actionTimeout - time.Since(r.state.ActionRequestedAt)
+			timeoutSec = maxInt(1, int(math.Ceil(remaining.Seconds())))
+		}
 		_ = conn.SendMessage("action_req", protocol.ActionRequestMsg{
 			PlayerID:     player.ID,
 			ValidActions: valid,
@@ -456,9 +491,11 @@ func (r *Room) sendActionRequest() {
 			MinRaise:     minRaise,
 			MaxRaise:     player.Bet + player.Stack,
 			CanUseSkill:  canUseSkill,
-			TimeoutSec:   int(actionTimeout.Seconds()),
+			TimeoutSec:   timeoutSec,
 		})
-		r.state.ActionRequestedAt = time.Now()
+		if r.state.ActionRequestedAt.IsZero() {
+			r.state.ActionRequestedAt = time.Now()
+		}
 		return
 	}
 }
@@ -577,6 +614,12 @@ func (r *Room) remainingInHand() int {
 }
 
 func (r *Room) finishHandByFold() {
+	r.state.Phase = PhaseShowdown
+	r.state.CurrentPlayer = ""
+	r.state.ActionRequestedAt = time.Time{}
+	r.effects.ClearHand()
+	r.state.Pots = CalculatePots(r.state.Players)
+
 	var winner *PlayerState
 	for _, p := range r.state.Players {
 		if p.IsInHand() {
@@ -590,6 +633,17 @@ func (r *Room) finishHandByFold() {
 			total += p.TotalBet
 		}
 		winner.Stack += total
+		r.state.LastResult = &HandResult{
+			Reason: "fold",
+			Winners: []HandWinner{{
+				PlayerID:     winner.ID,
+				PlayerName:   winner.Name,
+				Amount:       total,
+				HandCategory: -1,
+			}},
+		}
+		r.state.NextHandAt = time.Now().Add(nextHandDelay)
+		return
 	}
 	r.endHand()
 }
@@ -614,6 +668,7 @@ func (r *Room) showdown() {
 		cards = append(cards, r.state.Community...)
 		rankMap[p.ID] = poker.EvaluateBest(cards)
 	}
+	payouts := map[string]int{}
 
 	for _, pot := range r.state.Pots {
 		if len(pot.Eligible) == 0 {
@@ -651,8 +706,25 @@ func (r *Room) showdown() {
 				add++
 			}
 			player.Stack += add
+			payouts[id] += add
 		}
 	}
+
+	result := &HandResult{Reason: "showdown"}
+	for _, player := range r.orderedPlayers() {
+		amount := payouts[player.ID]
+		if amount <= 0 {
+			continue
+		}
+		rank := rankMap[player.ID]
+		result.Winners = append(result.Winners, HandWinner{
+			PlayerID:     player.ID,
+			PlayerName:   player.Name,
+			Amount:       amount,
+			HandCategory: rank.Category,
+		})
+	}
+	r.state.LastResult = result
 	r.state.NextHandAt = time.Now().Add(nextHandDelay)
 }
 
@@ -705,6 +777,7 @@ func (r *Room) endHand() {
 	r.state.CurrentPlayer = ""
 	r.state.ActionRequestedAt = time.Time{}
 	r.state.Phase = PhaseWaiting
+	r.state.NextHandAt = time.Time{}
 	r.effects.ClearHand()
 
 	if r.humanCount() == 0 && r.connectedHumanCount() == 0 {
@@ -732,6 +805,7 @@ func (r *Room) shouldAutoStartWaitingHand() bool {
 func (r *Room) startHand() {
 	r.state.HandSeq++
 	r.state.Phase = PhaseDealing
+	r.state.LastResult = nil
 	r.state.Community = nil
 	r.state.Pots = nil
 	r.state.RecentActions = nil
@@ -1292,6 +1366,22 @@ func (r *Room) ensureBots(target int) bool {
 	return changed
 }
 
+func (r *Room) removeBustedBots() bool {
+	kept := make([]*PlayerState, 0, len(r.state.Players))
+	changed := false
+	for _, player := range r.state.Players {
+		if player.IsBot && player.Stack <= 0 {
+			changed = true
+			continue
+		}
+		kept = append(kept, player)
+	}
+	if changed {
+		r.state.Players = kept
+	}
+	return changed
+}
+
 func (r *Room) humanCount() int {
 	count := 0
 	for _, p := range r.state.Players {
@@ -1352,6 +1442,7 @@ func (r *Room) resetForFreshSession(playerID string) {
 	r.state.DealerSeat = -1
 	r.state.Phase = PhaseWaiting
 	r.state.NextHandAt = time.Time{}
+	r.state.LastResult = nil
 	r.effects.ClearHand()
 }
 
@@ -1368,6 +1459,7 @@ func (r *Room) resetToEmptyRoom() {
 	r.state.DealerSeat = -1
 	r.state.Phase = PhaseWaiting
 	r.state.NextHandAt = time.Time{}
+	r.state.LastResult = nil
 	r.effects.ClearHand()
 	r.conns = map[string]Conn{}
 	r.disconnected = map[string]time.Time{}

@@ -64,7 +64,9 @@ function assertWithReason(condition, reason) {
 async function waitForJoined(page) {
   await page.waitForFunction(() => {
     const statusText = document.querySelector("#statusText")?.textContent || "";
-    return statusText.includes("已加入") || statusText.includes("已创建");
+    return statusText.includes("已加入")
+      || statusText.includes("已创建")
+      || statusText.includes("牌局进行中");
   }, { timeout: 15000 });
 
   await page.waitForFunction(() => {
@@ -137,15 +139,8 @@ async function openAndJoin(page, attempt, _roomId) {
     const gs = document.getElementById("gameScreen");
     return gs && gs.style.display !== "none";
   }, { timeout: 15000 });
-  // Send multiple add_bot requests in one turn to avoid racing the auto-start at 2 players.
-  await page.waitForSelector("#addBotBtn", { state: "visible", timeout: 10000 });
-  await page.evaluate(() => {
-    const button = document.querySelector("#addBotBtn");
-    for (let i = 0; i < 3; i += 1) {
-      button?.click();
-    }
-  });
-  await page.waitForTimeout(300);
+  await page.waitForSelector("#quickStartBtn", { state: "visible", timeout: 10000 });
+  await page.click("#quickStartBtn");
   await waitForJoined(page);
 }
 

@@ -23,7 +23,8 @@ func EncodeMessage(msgType string, seq int64, payload any) ([]byte, error) {
 
 // CreateRoomMsg is sent C→S to create a new room (server auto-joins the sender).
 type CreateRoomMsg struct {
-	Name string `json:"name,omitempty"`
+	Name       string `json:"name,omitempty"`
+	QuickStart bool   `json:"quick_start,omitempty"`
 }
 
 // RoomCreatedMsg is sent S→C after a room is successfully created.

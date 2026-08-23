@@ -35,6 +35,19 @@ type GameState struct {
 	NextHandAt        time.Time
 	HandSeq           int64
 	ActionRequestedAt time.Time
+	LastResult        *HandResult
+}
+
+type HandResult struct {
+	Reason  string
+	Winners []HandWinner
+}
+
+type HandWinner struct {
+	PlayerID     string
+	PlayerName   string
+	Amount       int
+	HandCategory int
 }
 
 type ActionRecord struct {

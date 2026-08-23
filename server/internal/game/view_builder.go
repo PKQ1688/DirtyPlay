@@ -39,7 +39,8 @@ func BuildGameState(state *GameState, effects *skill.Effects, viewer *PlayerStat
 			info.HeatWarning = true
 		}
 
-		if state.Phase == PhaseShowdown && p.IsInHand() {
+		showHands := state.Phase == PhaseShowdown && (state.LastResult == nil || state.LastResult.Reason != "fold")
+		if showHands && p.IsInHand() {
 			info.Hand = cardStrings(p.Hand)
 		} else if state.Phase != PhaseShowdown && p.ID != viewer.ID && effects != nil {
 			if bluff, ok := effects.Bluff[p.ID]; ok && bluff.Street == string(state.Phase) {
@@ -65,6 +66,26 @@ func BuildGameState(state *GameState, effects *skill.Effects, viewer *PlayerStat
 		DealerSeat:     state.DealerSeat,
 		HandSeq:        state.HandSeq,
 		RecentActions:  toActionInfo(state.RecentActions),
+		Result:         toHandResultInfo(state.LastResult),
+	}
+}
+
+func toHandResultInfo(result *HandResult) *protocol.HandResultInfo {
+	if result == nil {
+		return nil
+	}
+	winners := make([]protocol.WinnerInfo, 0, len(result.Winners))
+	for _, winner := range result.Winners {
+		winners = append(winners, protocol.WinnerInfo{
+			PlayerID:     winner.PlayerID,
+			PlayerName:   winner.PlayerName,
+			Amount:       winner.Amount,
+			HandCategory: winner.HandCategory,
+		})
+	}
+	return &protocol.HandResultInfo{
+		Reason:  result.Reason,
+		Winners: winners,
 	}
 }
 

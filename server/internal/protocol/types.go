@@ -40,18 +40,31 @@ type ActionRequestMsg struct {
 }
 
 type GameStateMsg struct {
-	Phase          string       `json:"phase"`
-	TotalPot       int          `json:"total_pot"`
-	Pots           []PotInfo    `json:"pots"`
-	CommunityCards []string     `json:"community_cards"`
-	MyHand         []string     `json:"my_hand"`
-	MySkills       []SkillInfo  `json:"my_skills"`
-	MyHeat         int          `json:"my_heat"`
-	Players        []PlayerInfo `json:"players"`
-	CurrentPlayer  string       `json:"current_player"`
-	DealerSeat     int          `json:"dealer_seat"`
-	HandSeq        int64        `json:"hand_seq"`
-	RecentActions  []ActionInfo `json:"recent_actions"`
+	Phase          string          `json:"phase"`
+	TotalPot       int             `json:"total_pot"`
+	Pots           []PotInfo       `json:"pots"`
+	CommunityCards []string        `json:"community_cards"`
+	MyHand         []string        `json:"my_hand"`
+	MySkills       []SkillInfo     `json:"my_skills"`
+	MyHeat         int             `json:"my_heat"`
+	Players        []PlayerInfo    `json:"players"`
+	CurrentPlayer  string          `json:"current_player"`
+	DealerSeat     int             `json:"dealer_seat"`
+	HandSeq        int64           `json:"hand_seq"`
+	RecentActions  []ActionInfo    `json:"recent_actions"`
+	Result         *HandResultInfo `json:"result,omitempty"`
+}
+
+type HandResultInfo struct {
+	Reason  string       `json:"reason"`
+	Winners []WinnerInfo `json:"winners"`
+}
+
+type WinnerInfo struct {
+	PlayerID     string `json:"player_id"`
+	PlayerName   string `json:"player_name"`
+	Amount       int    `json:"amount"`
+	HandCategory int    `json:"hand_category"`
 }
 
 type PlayerInfo struct {

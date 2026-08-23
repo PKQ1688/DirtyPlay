@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DirtyPlay Web</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260823d" />
   </head>
   <body>
     <main class="app">
@@ -14,6 +14,7 @@
         <header class="lobby-hero">
           <h1 class="lobby-title">DirtyPlay</h1>
           <p class="lobby-sub">千术德州扑克</p>
+          <p class="lobby-pitch">牌是真的，眼见未必为实。</p>
         </header>
 
         <div class="lobby-form">
@@ -21,11 +22,19 @@
         </div>
 
         <div class="lobby-actions">
-          <button id="createRoomBtn" class="lobby-big-btn">创建房间</button>
+          <button id="quickPlayBtn" class="lobby-big-btn">快速开局 · 对战 3 名 AI</button>
+          <button id="createRoomBtn" class="lobby-big-btn secondary">创建好友房</button>
           <div class="lobby-join-row">
             <input id="roomCodeInput" type="text" placeholder="输入邀请码" maxlength="6" class="code-input" />
             <button id="joinRoomBtn" class="lobby-big-btn secondary">加入</button>
           </div>
+          <button id="lobbyRulesBtn" class="text-btn" type="button">先看看怎么玩 →</button>
+        </div>
+
+        <div class="lobby-features" aria-label="游戏特色">
+          <div><strong>经典底子</strong><span>完整德州、All-in 与边池</span></div>
+          <div><strong>千术博弈</strong><span>窥牌、造假、换牌与反侦察</span></div>
+          <div><strong>见好就收</strong><span>怀疑值过高会暴露并锁技</span></div>
         </div>
 
         <p id="lobbyError" class="lobby-error" style="display:none"></p>
@@ -38,6 +47,9 @@
         <div class="game-topbar">
           <button id="backToLobbyBtn" class="ghost-btn">← 返回大厅</button>
           <span id="roomCodeBadge" class="room-badge"></span>
+          <span id="handSeqBadge" class="room-badge">第 0 手牌</span>
+          <button id="soundToggleBtn" class="ghost-btn" type="button">🔊 音效: 开</button>
+          <button id="gameRulesBtn" class="ghost-btn" type="button">玩法说明</button>
           <span id="statusText" class="status-text" data-kind="ok">未连接</span>
         </div>
 
@@ -50,8 +62,9 @@
           </div>
           <p class="waiting-hint">分享邀请码邀请好友，满2人自动开局；若添加 AI 对手，请手动点击开始游戏。</p>
           <div class="waiting-actions">
+            <button id="quickStartBtn" class="lobby-big-btn" type="button">补满 AI 并开局</button>
             <button id="addBotBtn" class="add-bot-btn">＋ 添加AI对手</button>
-            <button id="startGameBtn" class="lobby-big-btn" type="button" disabled>开始游戏</button>
+            <button id="startGameBtn" class="add-bot-btn" type="button" disabled>按当前阵容开始</button>
           </div>
           <p id="waitingPlayerCount" class="waiting-count"></p>
         </div>
@@ -67,9 +80,17 @@
               <span id="mainPotText" class="meta-pill">主池: 0</span>
               <span id="sidePotsText" class="meta-pill">边池: -</span>
               <span id="heatText" class="meta-pill">怀疑值: 0</span>
+              <span id="turnTimerText" class="meta-pill turn-timer-pill">等待行动</span>
             </div>
 
             <div class="table-surface">
+              <div id="turnBanner" class="turn-banner" hidden>轮到你了</div>
+              <section id="handResult" class="hand-result" aria-live="assertive" hidden>
+                <span class="result-kicker">本手结算</span>
+                <strong id="handResultTitle">胜者</strong>
+                <span id="handResultDetail"></span>
+              </section>
+
               <section class="zone community-zone" aria-label="公共牌区">
                 <h3>公共牌</h3>
                 <div id="communityCards" class="cards-row cards-community"></div>
@@ -99,16 +120,22 @@
               </div>
 
               <div class="action-buttons">
-                <button id="foldButton" type="button" disabled>弃牌</button>
-                <button id="checkButton" type="button" disabled>过牌</button>
-                <button id="callButton" type="button" disabled>跟注</button>
-                <button id="allInButton" type="button" disabled>全下</button>
+                <button id="foldButton" type="button" disabled>弃牌 <kbd>F</kbd></button>
+                <button id="checkButton" type="button" disabled>过牌 <kbd>K</kbd></button>
+                <button id="callButton" type="button" disabled>跟注 <kbd>C</kbd></button>
+                <button id="allInButton" type="button" disabled>全下 <kbd>A</kbd></button>
+              </div>
+
+              <div class="raise-presets" aria-label="快捷加注">
+                <button type="button" class="ghost-btn bet-preset" data-pot-fraction="0.5" disabled>½ 池</button>
+                <button type="button" class="ghost-btn bet-preset" data-pot-fraction="0.75" disabled>¾ 池</button>
+                <button type="button" class="ghost-btn bet-preset" data-pot-fraction="1" disabled>满池</button>
               </div>
 
               <div class="raise-row">
                 <label for="raiseInput">加注到</label>
                 <input id="raiseInput" type="number" min="0" value="0" />
-                <button id="raiseButton" type="button" disabled>加注</button>
+                <button id="raiseButton" type="button" disabled>加注 <kbd>R</kbd></button>
               </div>
             </section>
 
@@ -118,6 +145,10 @@
               <p id="selectedSkillText">已选技能: -</p>
               <p id="skillDescriptionText" class="skill-description">技能说明: -</p>
               <p id="skillHintText" class="skill-hint" data-kind="warn">可用性: -</p>
+              <div class="heat-meter" aria-label="怀疑值进度">
+                <div class="heat-meter-copy"><span>低调</span><span id="heatMeterLabel">0 / 100</span><span>暴露</span></div>
+                <div class="heat-meter-track"><span id="heatMeterFill"></span></div>
+              </div>
               <div id="skillButtons" class="skill-buttons"></div>
 
               <div class="skill-controls">
@@ -154,6 +185,43 @@
 
     <ul id="playersList" class="sr-only" aria-hidden="true"></ul>
 
-    <script src="./app.js"></script>
+    <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+
+    <dialog id="rulesDialog" class="rules-dialog">
+      <div class="rules-dialog-head">
+        <div>
+          <span class="result-kicker">DirtyPlay 入门</span>
+          <h2>赢筹码，也要骗过所有人的眼睛</h2>
+        </div>
+        <button id="closeRulesBtn" class="ghost-btn" type="button" aria-label="关闭玩法说明">关闭</button>
+      </div>
+      <div class="rules-grid">
+        <section>
+          <h3>一手牌怎么打</h3>
+          <ol>
+            <li>每人两张手牌，依次经历翻牌前、翻牌、转牌、河牌。</li>
+            <li>轮到你时可以弃牌、过牌、跟注、加注或全下。</li>
+            <li>坚持到摊牌，用七张牌中的最佳五张组合争夺底池。</li>
+          </ol>
+        </section>
+        <section>
+          <h3>千术怎么用</h3>
+          <ul>
+            <li><b>窥视</b>：偷看对手一张真手牌。</li>
+            <li><b>虚张声势</b>：让别人看到你的假手牌。</li>
+            <li><b>迷雾</b>：让别人看到错误的公共牌。</li>
+            <li><b>换牌</b>：真正替换自己的一张手牌。</li>
+            <li><b>反侦察</b>：被动抵消一次窥视。</li>
+          </ul>
+        </section>
+        <section class="rules-warning">
+          <h3>别让怀疑值爆表</h3>
+          <p>用千术会增加怀疑值。达到 70 后对手会发现你可疑，达到 100 后技能锁定；每手结束降低 10。</p>
+        </section>
+      </div>
+      <p class="shortcut-note">快捷键：F 弃牌 · K 过牌 · C 跟注 · R 加注 · A 全下</p>
+    </dialog>
+
+    <script src="./app.js?v=20260823d"></script>
   </body>
 </html>

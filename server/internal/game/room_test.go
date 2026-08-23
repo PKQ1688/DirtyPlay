@@ -39,6 +39,17 @@ func (c *testConn) lastAck() (protocol.AckMsg, bool) {
 	return protocol.AckMsg{}, false
 }
 
+func (c *testConn) lastActionRequest() (protocol.ActionRequestMsg, bool) {
+	for i := len(c.messages) - 1; i >= 0; i-- {
+		if c.messages[i].msgType != "action_req" {
+			continue
+		}
+		request, ok := c.messages[i].payload.(protocol.ActionRequestMsg)
+		return request, ok
+	}
+	return protocol.ActionRequestMsg{}, false
+}
+
 func (c *testConn) messageCount(msgType string) int {
 	count := 0
 	for _, message := range c.messages {
@@ -141,6 +152,83 @@ func TestHandleStartGameStartsHumanBotRoom(t *testing.T) {
 	}
 }
 
+func TestHandleQuickStartFillsFourPlayerTable(t *testing.T) {
+	room := NewRoom("room-quick-start")
+	host := newHumanPlayer("host", 0)
+	conn := &testConn{id: host.ID}
+	room.state.Players = []*PlayerState{host}
+	room.conns[host.ID] = conn
+
+	changed := room.handleQuickStart(Event{PlayerID: host.ID, Conn: conn})
+	if !changed {
+		t.Fatal("expected quick start to change room state")
+	}
+	if len(room.state.Players) != targetPlayers {
+		t.Fatalf("expected %d players, got %d", targetPlayers, len(room.state.Players))
+	}
+	if room.state.Phase != PhasePreFlop {
+		t.Fatalf("expected preflop after quick start, got %s", room.state.Phase)
+	}
+	if ack, ok := conn.lastAck(); !ok || !ack.Success {
+		t.Fatalf("expected successful ack, got %#v", ack)
+	}
+}
+
+func TestHandleQuickStartRebuysHumanAndReplacesBustedBots(t *testing.T) {
+	room := NewRoom("room-quick-rebuy")
+	host := newHumanPlayer("host", 0)
+	host.Stack = 0
+	host.Status = StatusOut
+	bustedBot := newBotPlayer("busted", 1)
+	bustedBot.Stack = 0
+	bustedBot.Status = StatusOut
+	conn := &testConn{id: host.ID}
+	room.state.Players = []*PlayerState{host, bustedBot}
+	room.conns[host.ID] = conn
+
+	if !room.handleQuickStart(Event{PlayerID: host.ID, Conn: conn}) {
+		t.Fatal("expected quick restart to succeed")
+	}
+	if host.Stack <= 0 || host.Stack > initialStack {
+		t.Fatalf("expected host to be rebought, got stack %d", host.Stack)
+	}
+	if room.state.PlayerByID(bustedBot.ID) != nil {
+		t.Fatal("expected busted bot to be replaced")
+	}
+	if len(room.state.Players) != targetPlayers {
+		t.Fatalf("expected table refilled to %d players, got %d", targetPlayers, len(room.state.Players))
+	}
+}
+
+func TestFinishHandByFoldPublishesResultBeforeNextHand(t *testing.T) {
+	room := NewRoom("room-fold-result")
+	winner := newHumanPlayer("winner", 0)
+	loser := newHumanPlayer("loser", 1)
+	winner.TotalBet = 10
+	loser.TotalBet = 10
+	loser.Status = StatusFolded
+	room.state.Players = []*PlayerState{winner, loser}
+	room.state.Phase = PhaseFlop
+
+	room.finishHandByFold()
+
+	if room.state.Phase != PhaseShowdown {
+		t.Fatalf("expected result phase, got %s", room.state.Phase)
+	}
+	if room.state.LastResult == nil || room.state.LastResult.Reason != "fold" {
+		t.Fatalf("expected fold result, got %#v", room.state.LastResult)
+	}
+	if len(room.state.LastResult.Winners) != 1 || room.state.LastResult.Winners[0].PlayerID != winner.ID {
+		t.Fatalf("expected winner in result, got %#v", room.state.LastResult.Winners)
+	}
+	if room.state.LastResult.Winners[0].Amount != 20 || winner.Stack != initialStack+20 {
+		t.Fatalf("expected winner to receive 20, result=%#v stack=%d", room.state.LastResult.Winners[0], winner.Stack)
+	}
+	if room.state.NextHandAt.IsZero() {
+		t.Fatal("expected next hand to be scheduled")
+	}
+}
+
 func TestCheckTimeoutsFoldsDisconnectedCurrentPlayerAfterEvictTimeout(t *testing.T) {
 	room := NewRoom("room-timeout")
 	p1 := newHumanPlayer("p1", 0)
@@ -238,6 +326,33 @@ func TestHandleSkillPeekAppliesHeatAndConsumesSkill(t *testing.T) {
 	}
 }
 
+func TestUsingSkillDoesNotResetActionDeadline(t *testing.T) {
+	room, actor, target, conn := setupSkillRoom("peek")
+	requestedAt := time.Now().Add(-5 * time.Second)
+	room.state.ActionRequestedAt = requestedAt
+
+	if !room.handleSkill(Event{
+		Type:     "skill",
+		PlayerID: actor.ID,
+		Conn:     conn,
+		Data:     protocol.SkillMsg{SkillID: "peek", TargetID: target.ID},
+	}) {
+		t.Fatal("expected peek to succeed")
+	}
+	room.sendActionRequest()
+
+	if !room.state.ActionRequestedAt.Equal(requestedAt) {
+		t.Fatalf("expected action deadline origin to remain %v, got %v", requestedAt, room.state.ActionRequestedAt)
+	}
+	request, ok := conn.lastActionRequest()
+	if !ok {
+		t.Fatal("expected refreshed action request")
+	}
+	if request.TimeoutSec < 24 || request.TimeoutSec > 25 {
+		t.Fatalf("expected about 25 seconds remaining, got %d", request.TimeoutSec)
+	}
+}
+
 func TestHandleSkillRejectsSecondUseInSameTurn(t *testing.T) {
 	room, actor, target, conn := setupSkillRoom("peek")
 	actor.SkillUsedThisTurn = true
@@ -332,5 +447,23 @@ func TestDisplayPotsKeepsBlindsInSingleMainPotUntilAllIn(t *testing.T) {
 	}
 	if pots[0].Amount != 15 {
 		t.Fatalf("expected main pot amount 15, got %d", pots[0].Amount)
+	}
+}
+
+func TestCalculatePotsMergesLayersWithSameEligiblePlayers(t *testing.T) {
+	p1 := newHumanPlayer("p1", 0)
+	p2 := newHumanPlayer("p2", 1)
+	p3 := newHumanPlayer("p3", 2)
+	p1.TotalBet = 36
+	p2.TotalBet = 10
+	p2.Status = StatusFolded
+	p3.TotalBet = 36
+
+	pots := CalculatePots([]*PlayerState{p1, p2, p3})
+	if len(pots) != 1 {
+		t.Fatalf("expected equivalent layers to merge into one pot, got %#v", pots)
+	}
+	if pots[0].Amount != 82 || len(pots[0].Eligible) != 2 {
+		t.Fatalf("expected one 82-chip pot with two eligible players, got %#v", pots[0])
 	}
 }

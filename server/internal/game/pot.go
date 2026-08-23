@@ -57,11 +57,28 @@ func CalculatePots(players []*PlayerState) []Pot {
 			continue
 		}
 		amount := (level - prev) * playerCount
-		pots = append(pots, Pot{
+		pot := Pot{
 			Amount:   amount,
 			Eligible: eligible,
-		})
+		}
+		if len(pots) > 0 && sameEligiblePlayers(pots[len(pots)-1].Eligible, pot.Eligible) {
+			pots[len(pots)-1].Amount += pot.Amount
+		} else {
+			pots = append(pots, pot)
+		}
 		prev = level
 	}
 	return pots
+}
+
+func sameEligiblePlayers(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

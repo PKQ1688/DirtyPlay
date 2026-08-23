@@ -31,6 +31,18 @@ const ACTION_LABELS = {
   out: "离桌",
 };
 
+const HAND_CATEGORY_LABELS = {
+  0: "高牌",
+  1: "一对",
+  2: "两对",
+  3: "三条",
+  4: "顺子",
+  5: "同花",
+  6: "葫芦",
+  7: "四条",
+  8: "同花顺",
+};
+
 const SKILL_META = {
   peek: {
     name: "窥视",
@@ -85,12 +97,12 @@ const SUIT_META = {
 };
 
 const SEAT_SLOTS = {
-  bottom: { name: "bottom", x: 0.5, y: 0.9 },
-  "right-lower": { name: "right-lower", x: 0.7, y: 0.78 },
-  "right-upper": { name: "right-upper", x: 0.84, y: 0.36 },
-  top: { name: "top", x: 0.5, y: 0.14 },
-  "left-upper": { name: "left-upper", x: 0.16, y: 0.36 },
-  "left-lower": { name: "left-lower", x: 0.3, y: 0.78 },
+  bottom: { name: "bottom", x: 0.5, y: 0.86 },
+  "right-lower": { name: "right-lower", x: 0.85, y: 0.68 },
+  "right-upper": { name: "right-upper", x: 0.85, y: 0.24 },
+  top: { name: "top", x: 0.5, y: 0.11 },
+  "left-upper": { name: "left-upper", x: 0.15, y: 0.24 },
+  "left-lower": { name: "left-lower", x: 0.15, y: 0.68 },
 };
 
 const OTHER_SEAT_SLOTS_BY_COUNT = {
@@ -112,15 +124,21 @@ const refs = {
   lobbyScreen: document.getElementById("lobbyScreen"),
   gameScreen: document.getElementById("gameScreen"),
   lobbyNameInput: document.getElementById("lobbyNameInput"),
+  quickPlayBtn: document.getElementById("quickPlayBtn"),
   createRoomBtn: document.getElementById("createRoomBtn"),
   joinRoomBtn: document.getElementById("joinRoomBtn"),
+  lobbyRulesBtn: document.getElementById("lobbyRulesBtn"),
   roomCodeInput: document.getElementById("roomCodeInput"),
   lobbyError: document.getElementById("lobbyError"),
   backToLobbyBtn: document.getElementById("backToLobbyBtn"),
+  soundToggleBtn: document.getElementById("soundToggleBtn"),
+  gameRulesBtn: document.getElementById("gameRulesBtn"),
   roomCodeBadge: document.getElementById("roomCodeBadge"),
+  handSeqBadge: document.getElementById("handSeqBadge"),
   waitingRoom: document.getElementById("waitingRoom"),
   waitingCode: document.getElementById("waitingCode"),
   copyCodeBtn: document.getElementById("copyCodeBtn"),
+  quickStartBtn: document.getElementById("quickStartBtn"),
   addBotBtn: document.getElementById("addBotBtn"),
   startGameBtn: document.getElementById("startGameBtn"),
   waitingPlayerCount: document.getElementById("waitingPlayerCount"),
@@ -132,6 +150,11 @@ const refs = {
   mainPotText: document.getElementById("mainPotText"),
   sidePotsText: document.getElementById("sidePotsText"),
   heatText: document.getElementById("heatText"),
+  turnTimerText: document.getElementById("turnTimerText"),
+  turnBanner: document.getElementById("turnBanner"),
+  handResult: document.getElementById("handResult"),
+  handResultTitle: document.getElementById("handResultTitle"),
+  handResultDetail: document.getElementById("handResultDetail"),
   communityText: document.getElementById("communityText"),
   handText: document.getElementById("handText"),
   skillsText: document.getElementById("skillsText"),
@@ -151,6 +174,7 @@ const refs = {
   raiseButton: document.getElementById("raiseButton"),
   allInButton: document.getElementById("allInButton"),
   raiseInput: document.getElementById("raiseInput"),
+  betPresetButtons: Array.from(document.querySelectorAll(".bet-preset")),
   skillButtons: document.getElementById("skillButtons"),
   selectedSkillText: document.getElementById("selectedSkillText"),
   skillDescriptionText: document.getElementById("skillDescriptionText"),
@@ -159,6 +183,11 @@ const refs = {
   cardIdxSelect: document.getElementById("cardIdxSelect"),
   useSkillButton: document.getElementById("useSkillButton"),
   actionLogList: document.getElementById("actionLogList"),
+  heatMeterLabel: document.getElementById("heatMeterLabel"),
+  heatMeterFill: document.getElementById("heatMeterFill"),
+  toastStack: document.getElementById("toastStack"),
+  rulesDialog: document.getElementById("rulesDialog"),
+  closeRulesBtn: document.getElementById("closeRulesBtn"),
 };
 
 const appState = {
@@ -179,7 +208,108 @@ const appState = {
   currentRoomId: "",
   _pendingJoinCode: "",
   actionPending: false,
+  actionTimeRemainingMs: 0,
+  actionTimeTotalMs: 0,
+  lastRenderedResultKey: "",
 };
+
+class SoundFXEngine {
+  constructor() {
+    this.ctx = null;
+    this.enabled = localStorage.getItem("dirtyplay_sound") !== "off";
+  }
+
+  init() {
+    if (!this.ctx && typeof window !== "undefined") {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) {
+        this.ctx = new AudioCtx();
+      }
+    }
+    if (this.ctx && this.ctx.state === "suspended") {
+      this.ctx.resume().catch(() => {});
+    }
+  }
+
+  toggle() {
+    this.enabled = !this.enabled;
+    localStorage.setItem("dirtyplay_sound", this.enabled ? "on" : "off");
+    return this.enabled;
+  }
+
+  play(type) {
+    if (!this.enabled) return;
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const t = this.ctx.currentTime;
+      if (type === "card") {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(450, t);
+        osc.frequency.exponentialRampToValueAtTime(150, t + 0.08);
+        gain.gain.setValueAtTime(0.18, t);
+        gain.gain.linearRampToValueAtTime(0.01, t + 0.08);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.08);
+      } else if (type === "chip") {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(1800, t);
+        osc.frequency.setValueAtTime(2400, t + 0.02);
+        gain.gain.setValueAtTime(0.2, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.08);
+      } else if (type === "turn") {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(587.33, t);
+        osc.frequency.setValueAtTime(880, t + 0.08);
+        gain.gain.setValueAtTime(0.25, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.35);
+      } else if (type === "win") {
+        [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = "triangle";
+          osc.frequency.setValueAtTime(freq, t + i * 0.08);
+          gain.gain.setValueAtTime(0.2, t + i * 0.08);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.08 + 0.22);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(t + i * 0.08);
+          osc.stop(t + i * 0.08 + 0.23);
+        });
+      } else if (type === "skill") {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(300, t);
+        osc.frequency.exponentialRampToValueAtTime(1200, t + 0.22);
+        gain.gain.setValueAtTime(0.2, t);
+        gain.gain.linearRampToValueAtTime(0.01, t + 0.25);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.25);
+      }
+    } catch (_e) {}
+  }
+}
+
+const soundFx = new SoundFXEngine();
 
 const uiTimers = [];
 setInterval(() => stepUiTimers(UI_TICK_MS), UI_TICK_MS);
@@ -195,15 +325,33 @@ renderHandCards([], []);
 renderSeats([], [], "");
 renderPotBreakdown([], 0);
 renderActionLog([]);
+renderHandResult(null);
+renderTurnTimer();
 updateActionArea();
 updateSkillControls();
 
+// Update sound toggle button label
+function updateSoundButtonLabel() {
+  if (refs.soundToggleBtn) {
+    refs.soundToggleBtn.textContent = soundFx.enabled ? "🔊 音效: 开" : "🔇 音效: 关";
+  }
+}
+updateSoundButtonLabel();
+
 // Lobby events
-refs.createRoomBtn.addEventListener("click", () => { void createRoom(); });
+refs.quickPlayBtn.addEventListener("click", () => { void createRoom(true); });
+refs.createRoomBtn.addEventListener("click", () => { void createRoom(false); });
 refs.joinRoomBtn.addEventListener("click", () => { void joinByCode(); });
+refs.quickStartBtn.addEventListener("click", quickStart);
 refs.addBotBtn.addEventListener("click", addBot);
 refs.startGameBtn.addEventListener("click", startGame);
 refs.backToLobbyBtn.addEventListener("click", () => { void disconnectSocket(); showLobby(); });
+if (refs.soundToggleBtn) {
+  refs.soundToggleBtn.addEventListener("click", () => {
+    soundFx.toggle();
+    updateSoundButtonLabel();
+  });
+}
 refs.copyCodeBtn.addEventListener("click", () => {
   navigator.clipboard.writeText(appState.currentRoomCode).catch(() => {});
 });
@@ -219,9 +367,22 @@ refs.raiseButton.addEventListener("click", () => {
   sendAction("raise", amount);
 });
 refs.allInButton.addEventListener("click", () => sendAction("all_in"));
+refs.raiseInput.addEventListener("input", updateActionArea);
+refs.betPresetButtons.forEach((button) => {
+  button.addEventListener("click", () => applyBetPreset(Number(button.dataset.potFraction || 0)));
+});
 refs.useSkillButton.addEventListener("click", useSkill);
 refs.targetSelect.addEventListener("change", updateSkillControls);
 refs.cardIdxSelect.addEventListener("change", updateSkillControls);
+refs.lobbyRulesBtn.addEventListener("click", openRules);
+refs.gameRulesBtn.addEventListener("click", openRules);
+refs.closeRulesBtn.addEventListener("click", closeRules);
+refs.rulesDialog.addEventListener("click", (event) => {
+  if (event.target === refs.rulesDialog) {
+    closeRules();
+  }
+});
+document.addEventListener("keydown", handleActionShortcut);
 
 window.render_game_to_text = renderGameToText;
 window.advanceTime = advanceTime;
@@ -326,6 +487,8 @@ function showLobby() {
   appState.lastState = normalizeState({});
   appState.actionReq = normalizeActionReq({});
   appState.actionPending = false;
+  clearActionTimer();
+  appState.lastRenderedResultKey = "";
   refs.lobbyScreen.style.display = "";
   refs.gameScreen.style.display = "none";
   showLobbyError("");
@@ -353,7 +516,7 @@ async function ensureConnected() {
   return connectToServer(false);
 }
 
-async function createRoom() {
+async function createRoom(quickStart = false) {
   const name = refs.lobbyNameInput.value.trim();
   showLobbyError("");
   const connected = await ensureConnected();
@@ -365,7 +528,11 @@ async function createRoom() {
     appState.playerName = name;
     localStorage.setItem(PLAYER_NAME_KEY, name);
   }
-  sendMessage("create_room", name ? { name } : {});
+  const payload = { quick_start: Boolean(quickStart) };
+  if (name) {
+    payload.name = name;
+  }
+  sendMessage("create_room", payload);
 }
 
 async function joinByCode() {
@@ -401,19 +568,31 @@ function addBot() {
   sendMessage("add_bot", {});
 }
 
+function quickStart() {
+  sendMessage("quick_start", {});
+}
+
 function startGame() {
   sendMessage("start_game", {});
 }
 
 function updateWaitingRoom(state) {
   const isWaiting = state.phase === "waiting";
-  const total = ensureArray(state.players).length || 0;
+  const players = ensureArray(state.players);
+  const total = players.length || 0;
+  const fundedPlayers = players.filter((player) => Number(player.stack || 0) > 0).length;
+  const me = players.find((player) => player.id === appState.playerId);
+  const isBusted = Boolean(me && Number(me.stack || 0) <= 0);
   refs.waitingRoom.style.display = isWaiting ? "" : "none";
   if (isWaiting) {
-    refs.waitingPlayerCount.textContent = `当前 ${total} 人 / 最多 6 人`;
+    refs.waitingPlayerCount.textContent = isBusted
+      ? "你的筹码已经用完，快速开局会自动重新买入 1000。"
+      : `当前 ${fundedPlayers} 名可开局玩家 · ${total} 个席位 / 最多 6 人`;
   }
   refs.addBotBtn.disabled = !isWaiting || total >= 6;
-  refs.startGameBtn.disabled = !isWaiting || total < 2;
+  refs.startGameBtn.disabled = !isWaiting || fundedPlayers < 2;
+  refs.quickStartBtn.disabled = !isWaiting;
+  refs.quickStartBtn.textContent = isBusted ? "重新买入并补满 AI" : "补满 AI 并开局";
 }
 
 function sendAction(action, amount = 0) {
@@ -430,8 +609,11 @@ function sendAction(action, amount = 0) {
     payload.amount = amount;
   }
 
+  soundFx.play(action === "fold" ? "card" : "chip");
   appState.actionPending = true;
+  clearActionTimer();
   updateActionArea();
+  renderTurnTimer();
   sendMessage("action", payload);
 }
 
@@ -457,6 +639,7 @@ function useSkill() {
     payload.card_idx = Number.parseInt(refs.cardIdxSelect.value, 10) || 0;
   }
 
+  soundFx.play("skill");
   appState.lastSkillAttempt = currentSkillId;
   sendMessage("skill", payload);
 }
@@ -507,6 +690,7 @@ function onMessage(raw) {
           showLobbyError(mappedError);
         } else {
           setStatus(`请求失败: ${mappedError}`, true);
+          showToast(mappedError, true);
         }
         appState.lastSentType = "";
         return;
@@ -544,8 +728,11 @@ function onMessage(raw) {
     case "action_req":
       appState.actionPending = false;
       appState.actionReq = normalizeActionReq(payload || {});
+      startActionTimer(appState.actionReq.timeout_sec);
+      setDefaultRaiseAmount();
       updateActionArea();
       updateSkillControls();
+      renderTurnTimer();
       break;
 
     case "skill_effect": {
@@ -553,16 +740,20 @@ function onMessage(raw) {
       appState.lastSkillAttempt = "";
       if (payload.blocked) {
         setStatus(`技能被抵消: ${skillName}`, true);
+        showToast(`${skillName}被反侦察抵消`, true);
       } else if (payload.result && payload.result.card) {
         setStatus(`技能生效: ${skillName} -> ${formatCardCodeVerbose(payload.result.card)}`, false);
+        showToast(`${skillName}生效：${formatCardCodeShort(payload.result.card)}`, false);
       } else {
         setStatus(`技能生效: ${skillName}`, false);
+        showToast(`${skillName}生效`, false);
       }
       break;
     }
 
     case "error":
       setStatus(`服务器错误: ${payload.message || "未知错误"}`, true);
+      showToast(payload.message || "服务器错误", true);
       break;
 
     default:
@@ -583,6 +774,8 @@ function renderState(rawState) {
   refs.turnText.textContent = `当前行动: ${currentPlayerName}`;
   refs.potText.textContent = `底池: ${Number(state.total_pot)}`;
   refs.heatText.textContent = `怀疑值: ${Number(state.my_heat)}`;
+  refs.handSeqBadge.textContent = `第 ${Number(state.hand_seq || 0)} 手牌`;
+  renderHeatMeter(state.my_heat);
   renderPotBreakdown(pots, state.total_pot);
 
   const skills = ensureArray(state.my_skills);
@@ -595,20 +788,24 @@ function renderState(rawState) {
   renderSeats(state.players, previousState.players, state.current_player);
   renderLegacyPlayers(state.players, state.current_player);
   renderActionLog(state.recent_actions);
+  renderHandResult(state.result);
 
   updateActionArea();
   updateSkillControls();
   updateWaitingRoom(state);
+  renderTurnTimer();
 }
 
 function syncActionReqWithState(state) {
   const currentPlayer = String(state?.current_player || "");
   if (!isActionPhase(state?.phase) || !currentPlayer) {
     appState.actionReq = normalizeActionReq({});
+    clearActionTimer();
     return;
   }
   if (appState.actionReq.player_id && appState.actionReq.player_id !== currentPlayer) {
     appState.actionReq = normalizeActionReq({});
+    clearActionTimer();
   }
 }
 
@@ -660,6 +857,10 @@ function renderCommunityCards(cards, previousCards) {
   const safeCards = ensureArray(cards);
   const safePreviousCards = ensureArray(previousCards);
 
+  if (safeCards.length > safePreviousCards.length) {
+    soundFx.play("card");
+  }
+
   if (safeCards.length === 0) {
     refs.communityText.textContent = "公共牌: -";
     return;
@@ -678,6 +879,10 @@ function renderHandCards(cards, previousCards) {
   const safeCards = ensureArray(cards);
   const safePreviousCards = ensureArray(previousCards);
 
+  if (safeCards.length > safePreviousCards.length) {
+    soundFx.play("card");
+  }
+
   if (safeCards.length === 0) {
     refs.handText.textContent = "我的手牌: -";
     return;
@@ -691,6 +896,8 @@ function renderHandCards(cards, previousCards) {
   refs.handText.textContent = `我的手牌: ${safeCards.map((cardCode) => formatCardCodeShort(cardCode)).join("、")}`;
 }
 
+const AVATARS = ["🎩", "🤖", "🕶️", "👑", "💎", "🦊"];
+
 function renderSeats(players, previousPlayers, currentPlayerId) {
   refs.seatsLayer.innerHTML = "";
   const sortedPlayers = ensureArray(players)
@@ -703,6 +910,7 @@ function renderSeats(players, previousPlayers, currentPlayerId) {
 
   const previousMap = new Map(ensureArray(previousPlayers).map((player) => [player.id, player]));
   const seatLayoutByPlayer = buildSeatLayoutByPlayer(sortedPlayers);
+  const winnerIds = new Set(ensureArray(appState.lastState.result?.winners).map((winner) => winner.player_id));
 
   for (const player of sortedPlayers) {
     const layout = seatLayoutByPlayer.get(player.id) || SEAT_SLOTS.bottom;
@@ -721,13 +929,28 @@ function renderSeats(players, previousPlayers, currentPlayerId) {
     if (status === "out") {
       seatNode.classList.add("is-out");
     }
+    if (winnerIds.has(player.id)) {
+      seatNode.classList.add("is-winner");
+    }
 
     const nameRow = document.createElement("div");
     nameRow.className = "seat-name";
 
+    const leftGroup = document.createElement("div");
+    leftGroup.style.display = "flex";
+    leftGroup.style.alignItems = "center";
+    leftGroup.style.gap = "6px";
+
+    const avatarSpan = document.createElement("span");
+    avatarSpan.className = "seat-avatar";
+    avatarSpan.textContent = AVATARS[Number(player.seat || 0) % AVATARS.length] || "👤";
+    leftGroup.appendChild(avatarSpan);
+
     const title = document.createElement("span");
     title.textContent = player.name || `玩家${Number(player.seat) + 1}`;
-    nameRow.appendChild(title);
+    leftGroup.appendChild(title);
+
+    nameRow.appendChild(leftGroup);
 
     const idText = document.createElement("span");
     idText.className = "seat-id";
@@ -736,9 +959,10 @@ function renderSeats(players, previousPlayers, currentPlayerId) {
 
     const metaRow = document.createElement("div");
     metaRow.className = "seat-meta";
-    metaRow.appendChild(makeChip(`筹码 ${Number(player.stack)}`));
-    metaRow.appendChild(makeChip(`本轮下注 ${Number(player.bet)}`));
-    metaRow.appendChild(makeChip(`本局投入 ${Number(player.total_bet)}`));
+    metaRow.appendChild(makeChip(`🪙 ${Number(player.stack)}`));
+    if (Number(player.bet) > 0) {
+      metaRow.appendChild(makeChip(`下注 ${Number(player.bet)}`));
+    }
     metaRow.appendChild(makeChip(statusLabel(status)));
 
     const lastAction = String(player.last_action || "");
@@ -751,11 +975,14 @@ function renderSeats(players, previousPlayers, currentPlayerId) {
     if (player.id === appState.playerId) {
       metaRow.appendChild(makeChip("自己", "self"));
     }
+    if (Number(player.seat) === Number(appState.lastState.dealer_seat)) {
+      metaRow.appendChild(makeChip("庄", "dealer"));
+    }
     if (player.id === currentPlayerId) {
       metaRow.appendChild(makeChip("行动中", "turn"));
     }
     if (player.heat_warning) {
-      metaRow.appendChild(makeChip("可疑", "warning"));
+      metaRow.appendChild(makeChip("🔥 可疑", "warning"));
     }
 
     const cardRow = document.createElement("div");
@@ -908,6 +1135,9 @@ function updateActionArea() {
   const isMyTurn = Boolean(appState.lastState.current_player && appState.lastState.current_player === appState.playerId);
   const ownsActionReq = Boolean(appState.actionReq.player_id && appState.actionReq.player_id === appState.playerId);
   const canActNow = isActionPhase(appState.lastState.phase) && isMyTurn && ownsActionReq && !appState.actionPending;
+  const canRaiseNow = canActNow && validActions.includes("raise");
+  const raiseValue = Number.parseInt(refs.raiseInput.value, 10);
+  const validRaiseValue = Number.isFinite(raiseValue) && raiseValue >= minRaiseTo && raiseValue <= maxRaise;
 
   refs.toCallText.textContent = `需跟注: ${toCall}`;
   refs.minRaiseText.textContent = `最小加注增量: ${minRaise}`;
@@ -916,15 +1146,49 @@ function updateActionArea() {
   refs.myStreetBetText.textContent = `本轮已下注: ${myStreetBet}`;
   refs.myInvestedText.textContent = `本局总投入: ${myInvested}`;
 
-  if (canActNow && validActions.includes("raise")) {
-    refs.raiseInput.value = String(minRaiseTo);
-  }
+  setShortcutButtonLabel(refs.foldButton, "弃牌", "F");
+  setShortcutButtonLabel(refs.checkButton, "过牌", "K");
+  setShortcutButtonLabel(refs.callButton, toCall > 0 ? `跟注 ${toCall}` : "跟注", "C");
+  setShortcutButtonLabel(refs.allInButton, maxRaise > 0 ? `全下 ${maxRaise - myStreetBet}` : "全下", "A");
+  setShortcutButtonLabel(refs.raiseButton, validRaiseValue ? `加注到 ${raiseValue}` : "加注", "R");
 
   refs.foldButton.disabled = !(canActNow && validActions.includes("fold"));
   refs.checkButton.disabled = !(canActNow && validActions.includes("check"));
   refs.callButton.disabled = !(canActNow && validActions.includes("call"));
-  refs.raiseButton.disabled = !(canActNow && validActions.includes("raise"));
+  refs.raiseButton.disabled = !(canRaiseNow && validRaiseValue);
   refs.allInButton.disabled = !(canActNow && validActions.includes("all_in"));
+  refs.raiseInput.disabled = !canRaiseNow;
+  refs.raiseInput.classList.toggle("is-invalid", canRaiseNow && !validRaiseValue);
+  refs.betPresetButtons.forEach((button) => {
+    button.disabled = !canRaiseNow;
+  });
+}
+
+function setDefaultRaiseAmount() {
+  const me = myPlayerState();
+  const myStreetBet = Number(me?.bet || 0);
+  const toCall = Number(appState.actionReq.to_call || 0);
+  const minRaise = Number(appState.actionReq.min_raise || 0);
+  refs.raiseInput.value = String(myStreetBet + toCall + minRaise);
+}
+
+function applyBetPreset(fraction) {
+  const me = myPlayerState();
+  const myStreetBet = Number(me?.bet || 0);
+  const toCall = Number(appState.actionReq.to_call || 0);
+  const minRaise = Number(appState.actionReq.min_raise || 0);
+  const maxRaise = Number(appState.actionReq.max_raise || 0);
+  const minRaiseTo = myStreetBet + toCall + minRaise;
+  const potAfterCall = Number(appState.lastState.total_pot || 0) + toCall;
+  const target = myStreetBet + toCall + Math.round(potAfterCall * Math.max(0, fraction));
+  refs.raiseInput.value = String(Math.min(maxRaise, Math.max(minRaiseTo, target)));
+  updateActionArea();
+}
+
+function setShortcutButtonLabel(button, label, shortcut) {
+  const key = document.createElement("kbd");
+  key.textContent = shortcut;
+  button.replaceChildren(document.createTextNode(`${label} `), key);
 }
 
 function updateSkillControls() {
@@ -1077,6 +1341,16 @@ function syncStatusWithState(state) {
     setStatus("已进入房间，等待开局", false);
     return;
   }
+  if (state.phase === "showdown" && ensureArray(state.result?.winners).length > 0) {
+    const winners = state.result.winners;
+    const ownWinner = winners.find((winner) => winner.player_id === appState.playerId);
+    if (ownWinner) {
+      setStatus(`本手获胜，赢得 ${Number(ownWinner.amount || 0)} 筹码`, false);
+    } else {
+      setStatus(`${winners.map((winner) => winner.player_name || shortId(winner.player_id)).join("、")} 赢得本手`, false);
+    }
+    return;
+  }
   setStatus(`牌局进行中：${displayPhase(state.phase)}`, false);
 }
 
@@ -1086,9 +1360,150 @@ function shouldAutoSyncStatus(text) {
     || value === "已加入房间"
     || value === "已进入房间，等待开局"
     || value.startsWith("牌局进行中：")
+    || value.startsWith("本手获胜，")
+    || value.endsWith("赢得本手")
     || value.startsWith("已加入，玩家ID ")
     || value.startsWith("请求失败:")
     || value.startsWith("服务器错误:");
+}
+
+function renderHeatMeter(value) {
+  const heat = Math.max(0, Math.min(100, Number(value || 0)));
+  refs.heatMeterLabel.textContent = `${heat} / 100`;
+  refs.heatMeterFill.style.width = `${heat}%`;
+  refs.heatMeterFill.dataset.level = heat >= 100 ? "locked" : heat >= 70 ? "warning" : "safe";
+}
+
+function renderHandResult(result) {
+  const winners = ensureArray(result?.winners);
+  if (!result || winners.length === 0) {
+    refs.handResult.hidden = true;
+    return;
+  }
+
+  const resultKey = `${Number(appState.lastState.hand_seq || 0)}:${String(result.reason || "")}:${winners.map((winner) => `${winner.player_id}:${winner.amount}`).join("|")}`;
+  const ownWinner = winners.find((winner) => winner.player_id === appState.playerId);
+  const winnerNames = winners.map((winner) => winner.player_name || shortId(winner.player_id)).join("、");
+
+  if (ownWinner) {
+    refs.handResultTitle.textContent = winners.length > 1 ? "你分得了底池" : "漂亮，你赢下这一手";
+  } else {
+    refs.handResultTitle.textContent = `${winnerNames} 赢得本手`;
+  }
+
+  refs.handResultDetail.textContent = winners.map((winner) => {
+    const category = HAND_CATEGORY_LABELS[Number(winner.hand_category)];
+    const reason = category || (String(result.reason) === "fold" ? "其他玩家弃牌" : "胜出");
+    return `${winner.player_name || shortId(winner.player_id)} +${Number(winner.amount || 0)} · ${reason}`;
+  }).join(" ｜ ");
+  refs.handResult.hidden = false;
+
+  if (appState.lastRenderedResultKey !== resultKey) {
+    appState.lastRenderedResultKey = resultKey;
+    soundFx.play("win");
+    if (ownWinner) {
+      setStatus(`本手获胜，赢得 ${Number(ownWinner.amount || 0)} 筹码`, false);
+      showToast(`你赢得 ${Number(ownWinner.amount || 0)} 筹码`, false);
+    } else {
+      setStatus(`${winnerNames} 赢得本手`, false);
+      showToast(`${winnerNames} 赢得本手`, false);
+    }
+  }
+}
+
+function startActionTimer(timeoutSec) {
+  const total = Math.max(0, Number(timeoutSec || 0) * 1000);
+  appState.actionTimeTotalMs = total;
+  appState.actionTimeRemainingMs = total;
+}
+
+function clearActionTimer() {
+  appState.actionTimeTotalMs = 0;
+  appState.actionTimeRemainingMs = 0;
+}
+
+function renderTurnTimer() {
+  const isMyTurn = isActionPhase(appState.lastState.phase)
+    && appState.lastState.current_player === appState.playerId;
+  if (isMyTurn && !appState._wasMyTurn) {
+    soundFx.play("turn");
+  }
+  appState._wasMyTurn = isMyTurn;
+
+  refs.turnTimerText.classList.remove("is-active", "is-urgent");
+  refs.turnBanner.hidden = !isMyTurn || appState.actionPending;
+
+  if (appState.actionPending) {
+    refs.turnTimerText.textContent = "处理中…";
+    return;
+  }
+  if (isMyTurn) {
+    const seconds = Math.max(0, Math.ceil(appState.actionTimeRemainingMs / 1000));
+    const expired = appState.actionTimeTotalMs > 0 && appState.actionTimeRemainingMs <= 0;
+    refs.turnTimerText.textContent = expired ? "时间到…" : seconds > 0 ? `你的回合 ${seconds}s` : "轮到你了";
+    refs.turnTimerText.classList.add(seconds > 0 && seconds <= 10 ? "is-urgent" : "is-active");
+    return;
+  }
+  if (isActionPhase(appState.lastState.phase)) {
+    refs.turnTimerText.textContent = "等待对手";
+    return;
+  }
+  if (appState.lastState.phase === "showdown") {
+    refs.turnTimerText.textContent = "即将发下一手";
+    return;
+  }
+  refs.turnTimerText.textContent = "等待开局";
+}
+
+function showToast(message, isError) {
+  if (!message || !refs.toastStack) {
+    return;
+  }
+  const toast = document.createElement("div");
+  toast.className = `toast${isError ? " is-error" : ""}`;
+  toast.textContent = String(message);
+  refs.toastStack.appendChild(toast);
+  scheduleUiTask(2800, () => toast.remove());
+}
+
+function openRules() {
+  if (typeof refs.rulesDialog.showModal === "function") {
+    refs.rulesDialog.showModal();
+  } else {
+    refs.rulesDialog.setAttribute("open", "");
+  }
+}
+
+function closeRules() {
+  if (typeof refs.rulesDialog.close === "function" && refs.rulesDialog.open) {
+    refs.rulesDialog.close();
+  } else {
+    refs.rulesDialog.removeAttribute("open");
+  }
+}
+
+function handleActionShortcut(event) {
+  if (event.repeat || refs.rulesDialog.open) {
+    return;
+  }
+  const active = document.activeElement;
+  const tag = String(active?.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "select" || tag === "textarea" || active?.isContentEditable) {
+    return;
+  }
+  const buttonByKey = {
+    f: refs.foldButton,
+    k: refs.checkButton,
+    c: refs.callButton,
+    r: refs.raiseButton,
+    a: refs.allInButton,
+  };
+  const button = buttonByKey[String(event.key || "").toLowerCase()];
+  if (!button || button.disabled) {
+    return;
+  }
+  event.preventDefault();
+  button.click();
 }
 
 function clearIdentity() {
@@ -1143,6 +1558,15 @@ function normalizeState(rawState) {
       amount: Number(action?.amount || 0),
       to: Number(action?.to || 0),
     })),
+    result: rawState?.result ? {
+      reason: String(rawState.result?.reason || ""),
+      winners: ensureArray(rawState.result?.winners).map((winner) => ({
+        player_id: String(winner?.player_id || ""),
+        player_name: String(winner?.player_name || ""),
+        amount: Number(winner?.amount || 0),
+        hand_category: Number(winner?.hand_category ?? -1),
+      })),
+    } : null,
     players: ensureArray(rawState?.players).map((player) => ({
       id: String(player?.id || ""),
       name: String(player?.name || ""),
@@ -1657,6 +2081,10 @@ function scheduleUiTask(durationMs, callback) {
 }
 
 function stepUiTimers(deltaMs) {
+  if (appState.actionTimeRemainingMs > 0) {
+    appState.actionTimeRemainingMs = Math.max(0, appState.actionTimeRemainingMs - deltaMs);
+    renderTurnTimer();
+  }
   for (let index = uiTimers.length - 1; index >= 0; index -= 1) {
     const task = uiTimers[index];
     task.remaining -= deltaMs;
@@ -1697,6 +2125,7 @@ function renderGameToText() {
     : calculatePotsFromPlayers(players);
   const canCreateRoom = appState.screen === "lobby" && Boolean(refs.createRoomBtn) && !refs.createRoomBtn.disabled;
   const canJoinRoom = appState.screen === "lobby" && Boolean(refs.joinRoomBtn) && !refs.joinRoomBtn.disabled;
+  const isGameScreen = appState.screen === "game";
 
   const seats = visiblePlayers.map((player) => {
     const layout = seatLayoutByPlayer.get(player.id) || SEAT_SLOTS.bottom;
@@ -1740,12 +2169,14 @@ function renderGameToText() {
       name: displaySkillName(skill),
       cost: Number(skill.cost || 0),
     })),
+    result: appState.lastState.result,
     action_request: {
       valid_actions: ensureArray(appState.actionReq.valid_actions),
       to_call: Number(appState.actionReq.to_call || 0),
       min_raise: Number(appState.actionReq.min_raise || 0),
       max_raise: Number(appState.actionReq.max_raise || 0),
       can_use_skill: appState.actionReq.can_use_skill !== false,
+      timeout_remaining_ms: Number(appState.actionTimeRemainingMs || 0),
     },
     selected_skill: appState.selectedSkillId || "",
     selected_skill_availability: evaluateSkillAvailability(appState.selectedSkillId || ""),
@@ -1772,8 +2203,9 @@ function renderGameToText() {
       raise_enabled: !refs.raiseButton.disabled,
       all_in_enabled: !refs.allInButton.disabled,
       use_skill_enabled: !refs.useSkillButton.disabled,
-      add_bot_enabled: !refs.addBotBtn.disabled,
-      start_game_enabled: !refs.startGameBtn.disabled,
+      quick_start_enabled: isGameScreen && !refs.quickStartBtn.disabled,
+      add_bot_enabled: isGameScreen && !refs.addBotBtn.disabled,
+      start_game_enabled: isGameScreen && !refs.startGameBtn.disabled,
     },
   };
 

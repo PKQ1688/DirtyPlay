@@ -255,4 +255,14 @@ func TestShowdownClearsCurrentPlayerAndTimeout(t *testing.T) {
 	if room.state.NextHandAt.IsZero() {
 		t.Fatalf("expected showdown to schedule next hand")
 	}
+	if room.state.LastResult == nil || room.state.LastResult.Reason != "showdown" {
+		t.Fatalf("expected structured showdown result, got %#v", room.state.LastResult)
+	}
+	if len(room.state.LastResult.Winners) != 1 {
+		t.Fatalf("expected one winner, got %#v", room.state.LastResult.Winners)
+	}
+	winner := room.state.LastResult.Winners[0]
+	if winner.PlayerID != first.ID || winner.Amount != 20 || winner.HandCategory != 0 {
+		t.Fatalf("unexpected winner result: %#v", winner)
+	}
 }
