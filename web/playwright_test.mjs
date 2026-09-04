@@ -885,9 +885,31 @@ async function testResponsive(browser) {
     try {
       await gotoLobby(page);
       const snap = await getSnapshot(page);
-      record("TC72 移动端竖屏显示横屏提示且大厅可操作", snap.createVisible && snap.joinVisible && snap.orientationTipVisible,
-        `orientation=${snap.orientationTipVisible}`);
+      const lobbyFitsViewport = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+      record("TC72 移动端竖屏自动适配且大厅可操作", snap.createVisible && snap.joinVisible && !snap.orientationTipVisible && lobbyFitsViewport,
+        `orientation=${snap.orientationTipVisible}, fits=${lobbyFitsViewport}`);
       await screenshot(page, "10-mobile-portrait.png");
+
+      await page.fill("#lobbyNameInput", "MobileTester");
+      await page.click("#quickPlayBtn");
+      await waitForGameStart(page, 15000);
+      const tableLayout = await page.evaluate(() => {
+        const table = document.querySelector(".table-surface")?.getBoundingClientRect();
+        const seats = Array.from(document.querySelectorAll(".seat")).map((node) => node.getBoundingClientRect());
+        if (!table || seats.length === 0) {
+          return { fits: false, seatCount: seats.length };
+        }
+        const tolerance = 1;
+        return {
+          fits: document.documentElement.scrollWidth <= window.innerWidth + tolerance
+            && table.left >= -tolerance
+            && table.right <= window.innerWidth + tolerance
+            && seats.every((seat) => seat.left >= table.left - tolerance && seat.right <= table.right + tolerance),
+          seatCount: seats.length,
+        };
+      });
+      record("TC72A 移动端竖屏牌桌与席位不横向溢出", tableLayout.fits && tableLayout.seatCount >= 2,
+        `fits=${tableLayout.fits}, seats=${tableLayout.seatCount}`);
     } catch (err) {
       record("移动端竖屏测试异常", false, String(err));
     } finally {

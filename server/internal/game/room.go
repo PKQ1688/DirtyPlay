@@ -76,14 +76,19 @@ func (r *Room) EventLoop() {
 			changed := r.handleEvent(evt)
 			if changed {
 				r.broadcastViews()
-				r.sendActionRequest()
+				if !r.state.Paused {
+					r.sendActionRequest()
+				}
 			}
 		case <-r.ticker.C:
+			if r.state.Paused {
+				continue
+			}
 			if r.checkTimeouts() {
 				r.broadcastViews()
 				r.sendActionRequest()
 			}
-			if r.state.Phase == PhaseShowdown && !r.state.NextHandAt.IsZero() && time.Now().After(r.state.NextHandAt) {
+			if r.state.Phase == PhaseShowdown && r.connectedHumanCount() == 0 && !r.state.NextHandAt.IsZero() && time.Now().After(r.state.NextHandAt) {
 				r.state.NextHandAt = time.Time{}
 				r.endHand()
 				r.tryStartHand()
@@ -117,9 +122,65 @@ func (r *Room) handleEvent(evt Event) bool {
 		return r.handleStartGame(evt)
 	case "quick_start":
 		return r.handleQuickStart(evt)
+	case "pause":
+		return r.handlePause(evt)
+	case "resume":
+		return r.handleResume(evt)
+	case "next_hand":
+		return r.handleNextHand(evt)
 	default:
 		return false
 	}
+}
+
+func (r *Room) handlePause(evt Event) bool {
+	if r.state.Phase == PhaseWaiting {
+		if evt.Conn != nil {
+			_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: "game not started"})
+		}
+		return false
+	}
+	if r.state.Paused {
+		return false
+	}
+	r.state.Paused = true
+	if evt.Conn != nil {
+		_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: true})
+	}
+	return true
+}
+
+func (r *Room) handleResume(evt Event) bool {
+	if !r.state.Paused {
+		return false
+	}
+	r.state.Paused = false
+	if evt.Conn != nil {
+		_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: true})
+	}
+	return true
+}
+
+func (r *Room) handleNextHand(evt Event) bool {
+	if r.state.Paused {
+		if evt.Conn != nil {
+			_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: "game paused"})
+		}
+		return false
+	}
+	if r.state.Phase != PhaseShowdown && r.state.Phase != PhaseWaiting {
+		if evt.Conn != nil {
+			_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: "not in showdown or waiting"})
+		}
+		return false
+	}
+	r.state.NextHandAt = time.Time{}
+	r.endHand()
+	r.tryStartHand()
+	if evt.Conn != nil {
+		_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: true})
+	}
+	return true
 }
 
 func (r *Room) handleJoin(evt Event) bool {
@@ -232,6 +293,10 @@ func (r *Room) handleAction(evt Event) bool {
 		_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: "invalid action"})
 		return false
 	}
+	if r.state.Paused {
+		_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: "game paused"})
+		return false
+	}
 	if r.state.Phase == PhaseWaiting || r.state.Phase == PhaseShowdown {
 		_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: "not in action phase"})
 		return false
@@ -260,6 +325,10 @@ func (r *Room) handleSkill(evt Event) bool {
 	skillMsg, ok := evt.Data.(protocol.SkillMsg)
 	if !ok {
 		_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: "invalid skill"})
+		return false
+	}
+	if r.state.Paused {
+		_ = evt.Conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: "game paused"})
 		return false
 	}
 	if r.state.Phase == PhaseWaiting || r.state.Phase == PhaseShowdown {
@@ -456,6 +525,9 @@ func (r *Room) broadcastViews() {
 
 func (r *Room) sendActionRequest() {
 	for {
+		if r.state.Paused {
+			return
+		}
 		if r.state.Phase != PhasePreFlop && r.state.Phase != PhaseFlop && r.state.Phase != PhaseTurn && r.state.Phase != PhaseRiver {
 			return
 		}
@@ -1028,6 +1100,9 @@ func (r *Room) dealCommunity(n int) {
 }
 
 func (r *Room) checkTimeouts() bool {
+	if r.state.Paused {
+		return false
+	}
 	changed := false
 	currentFolded := false
 	now := time.Now()
@@ -1052,7 +1127,11 @@ func (r *Room) checkTimeouts() bool {
 	if !r.state.ActionRequestedAt.IsZero() && r.state.CurrentPlayer != "" {
 		player := r.state.PlayerByID(r.state.CurrentPlayer)
 		if player != nil && player.CanAct() && !player.IsBot {
-			if now.Sub(r.state.ActionRequestedAt) >= actionTimeout {
+			timeout := actionTimeout
+			if r.connectedHumanCount() <= 1 {
+				timeout = 10 * time.Minute
+			}
+			if now.Sub(r.state.ActionRequestedAt) >= timeout {
 				toCall := r.state.CurrentBet - player.Bet
 				if toCall <= 0 {
 					_ = r.applyAction(player, protocol.ActionMsg{Action: "check"})
@@ -1441,6 +1520,7 @@ func (r *Room) resetForFreshSession(playerID string) {
 	r.state.MinRaise = r.state.BigBlind
 	r.state.DealerSeat = -1
 	r.state.Phase = PhaseWaiting
+	r.state.Paused = false
 	r.state.NextHandAt = time.Time{}
 	r.state.LastResult = nil
 	r.effects.ClearHand()
@@ -1458,6 +1538,7 @@ func (r *Room) resetToEmptyRoom() {
 	r.state.MinRaise = r.state.BigBlind
 	r.state.DealerSeat = -1
 	r.state.Phase = PhaseWaiting
+	r.state.Paused = false
 	r.state.NextHandAt = time.Time{}
 	r.state.LastResult = nil
 	r.effects.ClearHand()

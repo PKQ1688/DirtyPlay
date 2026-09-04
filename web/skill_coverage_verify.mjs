@@ -145,10 +145,16 @@ async function openAndJoin(page, attempt, _roomId) {
 }
 
 async function clickSkill(page, skillId) {
+  const cardSelector = `.skill-card-item[data-skill-id="${skillId}"]`;
+  if (await page.locator(cardSelector).count() > 0) {
+    await page.click(cardSelector);
+    await page.waitForTimeout(180);
+    return;
+  }
   const selector = `#skillButtons button[data-skill-id="${skillId}"]`;
   const count = await page.locator(selector).count();
   assertWithReason(count > 0, `未找到技能按钮: ${skillId}`);
-  await page.click(selector);
+  await page.click(selector, { force: true });
   await page.waitForTimeout(180);
 }
 

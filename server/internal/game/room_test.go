@@ -1,6 +1,7 @@
 package game
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ type capturedMessage struct {
 }
 
 type testConn struct {
+	mu       sync.Mutex
 	id       string
 	messages []capturedMessage
 }
@@ -24,11 +26,15 @@ func (c *testConn) ID() string {
 }
 
 func (c *testConn) SendMessage(msgType string, payload any) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.messages = append(c.messages, capturedMessage{msgType: msgType, payload: payload})
 	return nil
 }
 
 func (c *testConn) lastAck() (protocol.AckMsg, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	for i := len(c.messages) - 1; i >= 0; i-- {
 		if c.messages[i].msgType != "ack" {
 			continue
@@ -40,6 +46,8 @@ func (c *testConn) lastAck() (protocol.AckMsg, bool) {
 }
 
 func (c *testConn) lastActionRequest() (protocol.ActionRequestMsg, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	for i := len(c.messages) - 1; i >= 0; i-- {
 		if c.messages[i].msgType != "action_req" {
 			continue
@@ -51,6 +59,8 @@ func (c *testConn) lastActionRequest() (protocol.ActionRequestMsg, bool) {
 }
 
 func (c *testConn) messageCount(msgType string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	count := 0
 	for _, message := range c.messages {
 		if message.msgType == msgType {
@@ -465,5 +475,86 @@ func TestCalculatePotsMergesLayersWithSameEligiblePlayers(t *testing.T) {
 	}
 	if pots[0].Amount != 82 || len(pots[0].Eligible) != 2 {
 		t.Fatalf("expected one 82-chip pot with two eligible players, got %#v", pots[0])
+	}
+}
+
+func TestCalculatePotsKeepsFoldedOverageInContestablePot(t *testing.T) {
+	active := newHumanPlayer("active", 0)
+	active.TotalBet = 50
+	folded := newHumanPlayer("folded", 1)
+	folded.TotalBet = 100
+	folded.Status = StatusFolded
+
+	pots := CalculatePots([]*PlayerState{active, folded})
+	if len(pots) != 1 || pots[0].Amount != 150 || len(pots[0].Eligible) != 1 || pots[0].Eligible[0] != active.ID {
+		t.Fatalf("expected one contestable 150-chip pot, got %#v", pots)
+	}
+}
+
+func TestShowdownPaysFoldedOverageToEligibleWinner(t *testing.T) {
+	room := NewRoom("room-folded-overage")
+	room.ticker.Stop()
+
+	winner := newHumanPlayer("winner", 0)
+	winner.Stack = 0
+	winner.TotalBet = 50
+	winner.Status = StatusAllIn
+	winner.Hand = []poker.Card{makeCard(14, poker.Spades), makeCard(13, poker.Spades)}
+
+	folded := newHumanPlayer("folded", 1)
+	folded.Stack = 0
+	folded.TotalBet = 100
+	folded.Status = StatusFolded
+
+	room.state.Players = []*PlayerState{winner, folded}
+	room.state.Community = []poker.Card{
+		makeCard(2, poker.Clubs),
+		makeCard(4, poker.Diamonds),
+		makeCard(6, poker.Hearts),
+		makeCard(8, poker.Spades),
+		makeCard(10, poker.Clubs),
+	}
+
+	room.showdown()
+
+	if winner.Stack != 150 {
+		t.Fatalf("expected eligible winner to receive all 150 chips, got %d", winner.Stack)
+	}
+}
+
+func TestPausedRoomRejectsMutatingHandCommands(t *testing.T) {
+	room, actor, target, conn := setupSkillRoom("peek")
+	room.state.Paused = true
+
+	if room.handleAction(Event{
+		Type:     "action",
+		PlayerID: actor.ID,
+		Conn:     conn,
+		Data:     protocol.ActionMsg{Action: "check"},
+	}) {
+		t.Fatal("expected action to be rejected while paused")
+	}
+	if ack, ok := conn.lastAck(); !ok || ack.Error != "game paused" {
+		t.Fatalf("expected paused action error, got %#v", ack)
+	}
+
+	if room.handleSkill(Event{
+		Type:     "skill",
+		PlayerID: actor.ID,
+		Conn:     conn,
+		Data:     protocol.SkillMsg{SkillID: "peek", TargetID: target.ID},
+	}) {
+		t.Fatal("expected skill to be rejected while paused")
+	}
+	if ack, ok := conn.lastAck(); !ok || ack.Error != "game paused" {
+		t.Fatalf("expected paused skill error, got %#v", ack)
+	}
+
+	room.state.Phase = PhaseShowdown
+	if room.handleNextHand(Event{Type: "next_hand", PlayerID: actor.ID, Conn: conn}) {
+		t.Fatal("expected next hand to be rejected while paused")
+	}
+	if ack, ok := conn.lastAck(); !ok || ack.Error != "game paused" {
+		t.Fatalf("expected paused next-hand error, got %#v", ack)
 	}
 }

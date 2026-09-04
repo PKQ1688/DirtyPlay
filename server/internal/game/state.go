@@ -20,6 +20,7 @@ const (
 
 type GameState struct {
 	Phase             Phase
+	Paused            bool
 	Deck              []poker.Card
 	Community         []poker.Card
 	Players           []*PlayerState

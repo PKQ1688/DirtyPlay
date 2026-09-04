@@ -55,6 +55,7 @@ func BuildGameState(state *GameState, effects *skill.Effects, viewer *PlayerStat
 
 	return protocol.GameStateMsg{
 		Phase:          string(state.Phase),
+		Paused:         state.Paused,
 		TotalPot:       totalPot(state),
 		Pots:           toPotInfo(pots),
 		CommunityCards: cardStrings(community),

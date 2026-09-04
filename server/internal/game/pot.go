@@ -61,7 +61,12 @@ func CalculatePots(players []*PlayerState) []Pot {
 			Amount:   amount,
 			Eligible: eligible,
 		}
-		if len(pots) > 0 && sameEligiblePlayers(pots[len(pots)-1].Eligible, pot.Eligible) {
+		if len(pot.Eligible) == 0 && len(pots) > 0 && len(pots[len(pots)-1].Eligible) > 0 {
+			// Chips committed by folded players remain in the pot. If a higher
+			// contribution layer has no eligible player, carry it into the last
+			// contestable pot instead of dropping those chips at showdown.
+			pots[len(pots)-1].Amount += pot.Amount
+		} else if len(pots) > 0 && sameEligiblePlayers(pots[len(pots)-1].Eligible, pot.Eligible) {
 			pots[len(pots)-1].Amount += pot.Amount
 		} else {
 			pots = append(pots, pot)

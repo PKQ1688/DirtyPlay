@@ -41,6 +41,7 @@ type ActionRequestMsg struct {
 
 type GameStateMsg struct {
 	Phase          string          `json:"phase"`
+	Paused         bool            `json:"paused,omitempty"`
 	TotalPot       int             `json:"total_pot"`
 	Pots           []PotInfo       `json:"pots"`
 	CommunityCards []string        `json:"community_cards"`

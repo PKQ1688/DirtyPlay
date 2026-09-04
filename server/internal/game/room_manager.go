@@ -274,6 +274,39 @@ func (rm *RoomManager) HandleMessage(conn Conn, msgType string, seq int64, paylo
 			Conn:     conn,
 			Data:     skillMsg,
 		}
+	case "pause":
+		session, room, err := rm.sessionRoom(conn.ID())
+		if err != nil {
+			_ = conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: err.Error()})
+			return
+		}
+		room.eventCh <- Event{
+			Type:     "pause",
+			PlayerID: session.PlayerID,
+			Conn:     conn,
+		}
+	case "resume":
+		session, room, err := rm.sessionRoom(conn.ID())
+		if err != nil {
+			_ = conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: err.Error()})
+			return
+		}
+		room.eventCh <- Event{
+			Type:     "resume",
+			PlayerID: session.PlayerID,
+			Conn:     conn,
+		}
+	case "next_hand":
+		session, room, err := rm.sessionRoom(conn.ID())
+		if err != nil {
+			_ = conn.SendMessage("ack", protocol.AckMsg{Success: false, Error: err.Error()})
+			return
+		}
+		room.eventCh <- Event{
+			Type:     "next_hand",
+			PlayerID: session.PlayerID,
+			Conn:     conn,
+		}
 	case "ping":
 		_ = conn.SendMessage("pong", map[string]string{"ts": time.Now().Format(time.RFC3339Nano)})
 	default:
