@@ -195,10 +195,10 @@ async function createRoom(page, name = "") {
     document.getElementById("createRoomBtn")?.click();
   });
   await page.waitForFunction(() => {
-    const badge = document.querySelector("#roomCodeBadge");
-    return Boolean(badge && badge.textContent && badge.textContent.trim().length === 6);
+    const code = document.querySelector("#waitingCode")?.textContent?.trim() || "";
+    return /^[A-Z0-9]{6}$/.test(code);
   }, null, { timeout: 15000 });
-  return (await page.locator("#roomCodeBadge").textContent()).trim();
+  return (await page.locator("#waitingCode").textContent()).trim();
 }
 
 async function joinRoomByCode(page, code, name = "") {
@@ -403,7 +403,7 @@ async function testLobbyAndManualStart(browser) {
       return Boolean(node && node.textContent && node.textContent.trim().length > 0);
     }, null, { timeout: 5000 });
     snap = await getSnapshot(page);
-    record("TC03 短邀请码被前端拦截", snap.lobbyError === "请输入6位邀请码" && websockets.length === websocketCountBeforeShortJoin,
+    record("TC03 短邀请码被前端拦截", /6\s*位.*邀请码/.test(snap.lobbyError) && snap.lobbyVisible && !snap.gameVisible && websockets.length === websocketCountBeforeShortJoin,
       `${snap.lobbyError}; ws=${websockets.length - websocketCountBeforeShortJoin}`);
 
     await page.fill("#lobbyNameInput", "InvalidCodeUser");
@@ -421,7 +421,7 @@ async function testLobbyAndManualStart(browser) {
     const code = await createRoom(page, "");
     snap = await getSnapshot(page);
     record("TC05 空昵称建房回退到服务端默认名称", Boolean((snap.state.seats || []).find((seat) => seat.layout_slot === "bottom")?.name), JSON.stringify(snap.state.seats));
-    record("TC07 建房后等待室显示邀请码", snap.gameVisible && snap.waitingVisible && code.length === 6 && snap.waitingCode === code,
+    record("TC07 建房后等待室显示邀请码", snap.gameVisible && snap.waitingVisible && code.length === 6 && snap.waitingCode === code && snap.roomCodeBadge.endsWith(code),
       `badge=${snap.roomCodeBadge}, waiting=${snap.waitingCode}`);
     record("TC08 等待室人数提示正确", snap.waitingPlayerCount.includes("1") && snap.waitingPlayerCount.includes("6"), snap.waitingPlayerCount);
     record("TC09 等待室关键控件存在", snap.addBotVisible && snap.startGameVisible && snap.addBotEnabled && !snap.startGameEnabled,
@@ -695,7 +695,7 @@ async function testSkillAndDebugExport(browser) {
       && typeof snap.state.dealer_seat === "number"
       && seatLayoutOkay
       && recentActionShape
-      && snap.roomCodeBadge === code,
+      && snap.waitingCode === code && snap.roomCodeBadge.endsWith(code),
     `dealer=${snap.state.dealer_seat}, code=${snap.roomCodeBadge}`);
 
     await screenshot(page, "06-skill-debug.png");
@@ -935,6 +935,12 @@ async function testResponsive(browser) {
 }
 
 async function main() {
+  const validTests = new Set(["lobby", "auto_start", "room_full", "actions", "skills", "reconnect", "disconnect", "hand_flow", "responsive"]);
+  const unknownTests = [...ONLY_TESTS].filter((name) => !validTests.has(name));
+  if (unknownTests.length > 0) {
+    throw new Error(`未知的 DIRTYPLAY_TEST_ONLY 场景: ${unknownTests.join(", ")}; 可用场景: ${[...validTests].join(", ")}`);
+  }
+
   ensureDir(OUTPUT_DIR);
   console.log("\nDirtyPlay Playwright 回归测试");
   console.log(`URL: ${PAGE_URL}`);

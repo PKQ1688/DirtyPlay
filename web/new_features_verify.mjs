@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -25,62 +26,69 @@ async function run() {
     browser = await chromium.launch({ headless: true, executablePath: CHROME_PATH });
   }
 
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-  console.log("Navigating to", PAGE_URL);
-  await page.goto(PAGE_URL, { waitUntil: "domcontentloaded" });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    console.log("Navigating to", PAGE_URL);
+    await page.goto(PAGE_URL, { waitUntil: "domcontentloaded" });
 
-  // 1. Check lobby elements
-  await page.fill("#lobbyNameInput", "TesterHero");
-  await page.click("#quickPlayBtn");
+    // 1. Check lobby elements
+    await page.fill("#lobbyNameInput", "TesterHero");
+    await page.click("#quickPlayBtn");
 
-  // 2. Wait for game screen
-  await page.waitForSelector("#gameScreen", { state: "visible", timeout: 5000 });
-  console.log("Joined game screen successfully");
+    // 2. Wait for game screen
+    await page.waitForSelector("#gameScreen", { state: "visible", timeout: 5000 });
+    console.log("Joined game screen successfully");
 
-  // 3. Wait for hand to deal
-  await page.waitForFunction(() => {
-    const txt = document.getElementById("handRankBadge")?.textContent || "";
-    return txt.length > 0 && !txt.includes("等待发牌");
-  }, { timeout: 8000 });
+    // 3. Wait for hand to deal
+    await page.waitForFunction(() => {
+      const txt = document.getElementById("handRankBadge")?.textContent || "";
+      return txt.length > 0 && !txt.includes("等待发牌");
+    }, null, { timeout: 8000 });
 
-  const handRankText = await page.$eval("#handRankBadge", el => el.textContent);
-  console.log("Hand Rank Badge displayed:", handRankText);
+    const handRankText = await page.$eval("#handRankBadge", el => el.textContent);
+    console.log("Hand Rank Badge displayed:", handRankText);
 
-  // 4. Test Pause Feature
-  await page.click("#pauseGameBtn");
-  const isPauseOpen = await page.$eval("#pauseDialog", el => el.open);
-  console.log("Pause dialog opened:", isPauseOpen);
+    // 4. Test Pause Feature
+    await page.click("#pauseGameBtn");
+    const isPauseOpen = await page.$eval("#pauseDialog", el => el.open);
+    console.log("Pause dialog opened:", isPauseOpen);
 
-  if (!isPauseOpen) throw new Error("Pause dialog did not open!");
+    assert.ok(isPauseOpen, "Pause dialog did not open!");
 
-  // Test Speed Selector in Pause
-  await page.click('.speed-btn[data-speed="fast"]');
-  const activeSpeed = await page.$eval('.speed-btn.active', el => el.dataset.speed);
-  console.log("Active speed switched to:", activeSpeed);
+    // Test Speed Selector in Pause
+    await page.click('.speed-btn[data-speed="fast"]');
+    const activeSpeed = await page.$eval('.speed-btn.active', el => el.dataset.speed);
+    console.log("Active speed switched to:", activeSpeed);
+    assert.equal(activeSpeed, "fast", "Speed did not switch to fast!");
 
-  // Test Resume
-  await page.click("#resumeGameBtn");
-  const isPauseClosed = await page.$eval("#pauseDialog", el => !el.open);
-  console.log("Pause dialog closed on resume:", isPauseClosed);
+    // Test Resume
+    await page.click("#resumeGameBtn");
+    const isPauseClosed = await page.$eval("#pauseDialog", el => !el.open);
+    console.log("Pause dialog closed on resume:", isPauseClosed);
+    assert.ok(isPauseClosed, "Resume did not close the pause dialog!");
 
-  // 5. Test Action area buttons
-  await page.waitForFunction(() => {
-    const btn = document.getElementById("foldButton");
-    return btn && !btn.disabled;
-  }, { timeout: 10000 });
+    // 5. Test Action area buttons
+    await page.waitForFunction(() => {
+      const btn = document.getElementById("foldButton");
+      return btn && !btn.disabled;
+    }, null, { timeout: 10000 });
 
-  const callBtnText = await page.$eval("#callButton", el => el.textContent.trim());
-  const checkBtnVisible = await page.$eval("#checkButton", el => el.style.display !== "none");
-  console.log("Action button status: check visible =", checkBtnVisible, "call text =", callBtnText);
+    const callBtnText = await page.$eval("#callButton", el => el.textContent.trim());
+    const checkBtnVisible = await page.$eval("#checkButton", el => el.style.display !== "none");
+    console.log("Action button status: check visible =", checkBtnVisible, "call text =", callBtnText);
 
-  // 6. Test Shortcut Key P for pause
-  await page.keyboard.press("KeyP");
-  const pauseByShortcut = await page.$eval("#pauseDialog", el => el.open);
-  console.log("Pause triggered by shortcut 'P':", pauseByShortcut);
-  await page.keyboard.press("Escape");
+    // 6. Test Shortcut Key P for pause
+    await page.keyboard.press("KeyP");
+    const pauseByShortcut = await page.$eval("#pauseDialog", el => el.open);
+    console.log("Pause triggered by shortcut 'P':", pauseByShortcut);
+    assert.ok(pauseByShortcut, "P shortcut did not open the pause dialog!");
+    await page.keyboard.press("Escape");
+    assert.ok(await page.$eval("#pauseDialog", el => !el.open), "Escape did not close the pause dialog!");
 
-  console.log("All new features verified successfully!");
-  await browser.close();
+    console.log("All new features verified successfully!");
+  } finally {
+    await browser.close();
+  }
 }
 
 run().catch((err) => {

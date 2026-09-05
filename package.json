@@ -2,6 +2,9 @@
   "name": "dirtyplay-tools",
   "private": true,
   "scripts": {
+    "check:web": "node --check web/app.js && node --check web/playwright_test.mjs && node --check web/skill_coverage_verify.mjs && node --check web/new_features_verify.mjs",
+    "verify:e2e": "node web/playwright_test.mjs",
+    "verify:features": "node web/new_features_verify.mjs",
     "verify:skills": "node \"web/skill_coverage_verify.mjs\""
   },
   "dependencies": {

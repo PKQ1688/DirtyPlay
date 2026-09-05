@@ -1,47 +1,35 @@
-# Repository Guidelines
+# DirtyPlay 开发约定
 
-## Project Structure & Module Organization
-This repo contains a Godot client and a Go server.
+## 协作与边界
 
-- `client/` holds the Godot 4 project, scenes in `client/scenes/`, scripts in `client/scripts/`, and assets in `client/assets/`.
-- `server/` is the Go backend. Entry point lives in `server/cmd/server/main.go`, with core logic under `server/internal/`.
-- `docs/` contains design and technical documentation, including `docs/game_plan.md`.
+- 默认简体中文，先结论，再说明验证结果与未覆盖项；代码沿用所在文件的语言和风格。
+- 对实现、修复请求直接推进到完成。常规实现选择自行判断；只有会实质改变范围、正确性或授权的问题才询问，并继续不依赖答案的工作。
+- 保留用户已有改动。未经明确要求，不执行 commit、创建/切换分支或修改系统级配置；大量删除/覆盖、`git reset --hard`、push、数据库结构变更和生产写操作须有明确确认。已有授权不重复询问，需要确认时先完成可审阅的准备工作。
+- Skill 按任务需要加载；用户明确要求优先于其中的建议。若某条规则阻塞工作，指出文件、原文和具体影响，不把建议扩展为审批要求。
 
-## Build, Test, and Development Commands
-Run server dependencies and start the backend:
+## 仓库地图与约束
 
-```bash
-cd server
-go mod download
-go run cmd/server/main.go
-```
+- `web/`：主要客户端，原生 JavaScript/CSS/HTML，无构建步骤。Go 服务同时托管静态页面和 `/ws`。
+- `server/`：Go 模块；入口 `cmd/server/main.go`，核心逻辑在 `internal/`。`game/room.go` 的事件循环推进牌局，`game/view_builder.go` 生成玩家视图，`protocol/` 定义消息，`poker/`、`skill/` 实现牌型与技能。
+- `client/`：Godot 客户端，项目版本以 `project.godot` 为准。改共享协议时检查 Web 和 Godot 两端的调用与兼容性。
+- 服务端维护真实状态；保持房间状态经事件循环更新、玩家视图隔离和筹码结算一致性，不把对手隐藏信息发送给客户端后再隐藏。
+- Go 使用 `gofmt`；GDScript 使用 tab 与 `snake_case`；Web 沿用现有风格，JSON 字段与 `server/internal/protocol/` 对齐。只做任务所需的最小抽象。
+- 不提交密钥、依赖目录或生成产物。设计文档与历史测试计划用于背景，当前行为需核对实现和测试。
 
-Build a production server binary:
+## 执行与验证
 
-```bash
-cd server
-go build -o bin/server cmd/server/main.go
-./bin/server
-```
+- 先看 `git status --short` 和相关实现/测试；用 `rg` 定位，只读取与任务相关的上下文。独立读取可批量执行，有依赖的修改和验证按顺序执行。
+- 简单任务直接完成；复杂任务维护简短计划。宿主允许委派且有可独立验收的并行工作时，按文件或问题划分子任务，避免同时编辑同一文件，由主任务整合验证。
+- 从能验证行为的最小检查开始；只有跨模块影响、并发风险、失败或新证据才扩大范围。已通过的检查仅在相关改动后重跑，纯文档修改无需启动整套游戏回归。
+- 完成标准：请求已落实，相关检查有结果，diff 无意外改动。报告失败与未执行项；不以命令退出成功代替实际覆盖。获准提交时使用 Conventional Commits；PR（如被要求）说明行为变化、验证及 UI 截图。
 
-Run the client locally:
+| 任务 | 常用入口 |
+| --- | --- |
+| 本地启动 | 在 `server/` 执行 `go run ./cmd/server`，浏览 `http://127.0.0.1:8080` |
+| Go 局部验证 | 在 `server/` 执行 `go test ./internal/game`（替换为受影响包） |
+| Go 全量验证/构建 | 在 `server/` 执行 `go test ./...` / `go build ./...` |
+| Web 语法检查 | 仓库根目录执行 `npm run check:web` |
+| 浏览器回归 | 服务启动后执行 `npm run verify:e2e`；按需筛选场景 |
+| Godot 手动验证 | 打开 `client/project.godot`，F5 检查受影响场景 |
 
-- Open `client/project.godot` in Godot 4.3+ and press F5.
-
-## Coding Style & Naming Conventions
-- Go: follow `gofmt` conventions. Use `PascalCase` for exported identifiers and `camelCase` for locals. Keep files and packages in `lower_snake` or short lowercase names.
-- GDScript: follow Godot defaults with tabs for indentation, `snake_case` for functions/variables, and keep signal names lowercase (see `client/scripts/autoload/network.gd`).
-- Keep JSON fields `snake_case` and align with `server/internal/protocol/`.
-
-## Testing Guidelines
-There are no automated tests yet. When adding tests:
-
-- Go tests should use `*_test.go` and run with `go test ./...`.
-- Place unit tests next to the package they cover (e.g., `server/internal/game/`).
-
-## Commit & Pull Request Guidelines
-- Commit messages follow Conventional Commits style, e.g., `feat: add room manager` or `fix: handle disconnect`.
-- PRs should include a clear summary, testing notes, and screenshots for UI changes. Link related issues when applicable.
-
-## Security & Configuration
-- Do not commit secrets. Use local env files (e.g., `.env`, `.envrc`) for API keys and document required vars in the PR description.
+环境准备、场景筛选和结果判定见 [开发工作流](docs/workflow.md)；需要选择或执行回归时使用仓库技能 `dirtyplay-verify`。

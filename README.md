@@ -14,7 +14,8 @@
 
 | 组件 | 技术 | 说明 |
 |------|------|------|
-| 客户端 | Godot 4.3 | 跨平台游戏引擎，支持 Web 导出 |
+| 主要客户端 | 原生 JavaScript / HTML / CSS | 浏览器直接运行，无构建步骤 |
+| Godot 客户端 | Godot 4.5 | 版本以 `client/project.godot` 为准 |
 | 服务端 | Go 1.22+ | 高性能并发服务器 |
 | 通信协议 | WebSocket | 实时双向通信 |
 | 数据格式 | JSON | 简单易调试的消息格式 |
@@ -118,7 +119,8 @@ DirtyPlay/
 ### 环境要求
 
 - **Go 1.22+**
-- **Godot 4.3+**
+- **Node.js 18+**（运行浏览器回归脚本时需要）
+- **Godot 4.5**（运行 Godot 客户端时需要）
 
 ### 启动服务端
 
@@ -169,6 +171,8 @@ go run cmd/server/main.go
 在服务端运行后，可执行以下命令自动覆盖验证 `counter / mist / peek / bluff / swap`：
 
 ```bash
+npm ci
+npx playwright install chromium
 npm run verify:skills
 ```
 
@@ -222,6 +226,7 @@ go build -o bin/server cmd/server/main.go
 2. 在 `server/internal/skill/effects.go` 实现技能效果
 3. 在 `client/scripts/ui/game_table.gd` 增加技能选择与发送逻辑
 4. 在 `client/scripts/autoload/game_manager.gd` 调整 `use_skill` 请求字段（如需要）
+5. 同步 `web/app.js` 的技能交互，并按 [开发工作流](docs/workflow.md) 验证受影响的规则与客户端
 
 ### 调试技巧
 
@@ -231,6 +236,8 @@ go build -o bin/server cmd/server/main.go
 
 ## 📖 文档
 
+- [开发约定](AGENTS.md) - Agent 与协作者的共享规则
+- [开发工作流](docs/workflow.md) - 环境、验证命令与场景筛选
 - [详细技术方案](docs/game_plan.md) - 完整的游戏设计和技术实现文档
 
 ## 📄 许可证
